@@ -1401,7 +1401,7 @@ class GSFlightSinglePage(QWidget):
             self.combo_ports.addItem("")  # placeholder vazio
 
     def connect_serial(self):
-        """Conecta na porta escolhida e faz handshake robusto com READY / GPS_COORDS."""
+        """Conecta na porta escolhida e faz handshake com READY / GPS_COORDS."""
         port = self.combo_ports.currentText().strip()
         if not port:
             QMessageBox.warning(self, "Erro", "Nenhuma porta selecionada")
@@ -1411,7 +1411,10 @@ class GSFlightSinglePage(QWidget):
 
         try:
             if self.connected_ok and self.ser and self.ser.is_open:
-                QMessageBox.information(self, "Conexão", f"Já está conectado em {self.ser.port}")
+                self.ser.write(b"READY\n")
+                time.sleep(0.2)
+                self.ser.write(b"GPS_COORDS\n")
+                QMessageBox.information(self, "Conexão", f"Já está conectado em {self.ser.port}. Enviando READY novamente.")
                 return
 
             if self.logger:
