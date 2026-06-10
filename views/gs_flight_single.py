@@ -1,44 +1,54 @@
 # views/gs_flight_single.py
 from __future__ import annotations
+
 import math
-from typing import Optional, Tuple, List
-import sys
-import platform
-
-from PySide6.QtCore import Qt, QTimer, Slot
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter, QFrame, QLabel,
-    QPushButton, QPlainTextEdit, QCheckBox, QGroupBox, QSizePolicy, QMessageBox, QComboBox,
-    QStackedLayout, QFileDialog, QProgressDialog, QApplication, QDialog
-)
-
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
-
 import os
-import serial
-import serial.tools.list_ports
-import pyqtgraph.opengl as gl
-import numpy as np
+import platform
+import re
+import sys
 import time
 from dataclasses import dataclass, field
+from typing import List, Optional, Tuple
+
+import numpy as np
 import pyqtgraph as pg
-import math
-import re
-
-from views.net_manager import NetManager
+import pyqtgraph.opengl as gl
+import serial
+import serial.tools.list_ports
+from PySide6.QtCore import Qt, QTimer, Slot
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPlainTextEdit,
+    QProgressDialog,
+    QPushButton,
+    QSizePolicy,
+    QSplitter,
+    QStackedLayout,
+    QVBoxLayout,
+    QWidget,
+)
 from views.config_dialog import ConfigDialog
-from views.map_widget import MapWidget
-from views.rocket_3d import Rocket3DView
 from views.logger import Logger
-
-
-
+from views.map_widget import MapWidget
+from views.net_manager import NetManager
+from views.rocket_3d import Rocket3DView
 
 
 def get_os_info():
     os_name = platform.system().lower()
     return os_name
+
 
 @dataclass
 class RuntimeConfig:
@@ -58,8 +68,9 @@ class RuntimeConfig:
     test_lat: float = 0.0
     test_lon: float = 0.0
     test_alt: float = 0.0
-    pq_enabled: list[bool] = field(default_factory=lambda: [False]*4)
-    pq_time: list[float] = field(default_factory=lambda: [0.0]*4)
+    pq_enabled: list[bool] = field(default_factory=lambda: [False] * 4)
+    pq_time: list[float] = field(default_factory=lambda: [0.0] * 4)
+
 
 class LoadingSpinner(QWidget):
     def __init__(self, parent=None):
@@ -111,9 +122,9 @@ class BusySpinnerDialog(QDialog):
 
     def setLabelText(self, text: str):
         self.label.setText(text)
-        
+
+
 class GSFlightSinglePage(QWidget):
-   
     def __init__(self, net: NetManager, parent=None):
         super().__init__(parent)
         self.net = net
@@ -124,16 +135,18 @@ class GSFlightSinglePage(QWidget):
 
         self.os_system = get_os_info()
         self.is_linux = self.os_system == "linux"
-        print(f"[GS_FLIGHT]: Running on OS: {self.os_system}, Linux mode: {self.is_linux}")
+        print(
+            f"[GS_FLIGHT]: Running on OS: {self.os_system}, Linux mode: {self.is_linux}"
+        )
 
         self._build_ui(self.os_system)
         self._reset_state()
 
-        self.ser = None   # objeto serial
+        self.ser = None  # objeto serial
         self.timer_serial = QTimer(self)
         self.timer_serial.timeout.connect(self._read_serial)
         self.connected_ok = False
-        
+
         self.lastvalue_dn = 0.0
         self.lastvalue_db = 0.0
         self.lastvalue_mn = 0.0
@@ -147,7 +160,8 @@ class GSFlightSinglePage(QWidget):
         if self.is_linux:
             try:
                 from gpiozero import Buzzer
-                self._buzzer = Buzzer(6)   # GPIO 6 no Raspberry
+
+                self._buzzer = Buzzer(6)  # GPIO 6 no Raspberry
                 self._beep_mode = "gpio"
             except Exception:
                 self._buzzer = None
@@ -155,11 +169,12 @@ class GSFlightSinglePage(QWidget):
         else:
             try:
                 import winsound
+
                 self._beep_mode = "winsound"
             except Exception:
                 self._beep_mode = None
-    
-        self.logger = None 
+
+        self.logger = None
         QTimer.singleShot(100, self.ask_logger)  # espera 100ms e chama
 
         self._last_rx_time = time.time()
@@ -195,6 +210,8 @@ class GSFlightSinglePage(QWidget):
         # self._sim.timeout.connect(self._feed_fake)
         # self._sim.start(200)
 
+        self.refresh_ports()
+
     # =========================
     # GRAVAÇÃO (full screen)
     # =========================
@@ -206,7 +223,9 @@ class GSFlightSinglePage(QWidget):
             return 0.0
         return max(0.0, time.monotonic() - self._ui_rec_started_at)
 
-    def start_ui_recording(self, out_dir: str, fps: int = 10, full_desktop: bool = True) -> bool:
+    def start_ui_recording(
+        self, out_dir: str, fps: int = 10, full_desktop: bool = True
+    ) -> bool:
         """
         Salva frames PNG da tela inteira.
         - full_desktop=True  -> captura o DESKTOP inteiro (fullscreen real)
@@ -276,7 +295,6 @@ class GSFlightSinglePage(QWidget):
         else:
             self.map.set_offline(True, folder if folder else None)
 
-
     # ------------------ UI ------------------
     def _build_ui(self, os_name):
         root = QHBoxLayout(self)
@@ -296,7 +314,6 @@ class GSFlightSinglePage(QWidget):
         self.apply_map_mode()
         self.map.setMinimumSize(300, 200)   # opcional, garante espaço mínimo
         left_lay.addWidget(self.map, stretch=1)
-
 
         # --- BOTOES TERMINAL ---
         self.row_container = QWidget()
@@ -377,8 +394,6 @@ class GSFlightSinglePage(QWidget):
         serial_layout.addWidget(self.lbl_serial_title)
         serial_layout.addLayout(serial_row)
 
-
-
         # =========================
         # LAYOUT FINAL DA LINHA
         # =========================
@@ -389,10 +404,7 @@ class GSFlightSinglePage(QWidget):
         row.addWidget(self.btn_clear)
         row.addWidget(self.btn_cfg)
 
-
-
         left_lay.addWidget(self.row_container)
-
 
         # --- terminal ---
         self.terminal = QPlainTextEdit()
@@ -423,7 +435,6 @@ class GSFlightSinglePage(QWidget):
         # adiciona no lado esquerdo
         left_lay.addWidget(term_widget, stretch=1)
 
-
         # --- barra de status ---
         self.lbl_status = QLabel("Desconectado")
         self.lbl_status.setAlignment(Qt.AlignCenter)
@@ -448,15 +459,17 @@ class GSFlightSinglePage(QWidget):
 
         # --- orientação 3D (stack online/offline) ---
         from views.rocket_3d import Rocket3DView
+
         self.rocket3d = Rocket3DView()
         right_lay.addWidget(self.rocket3d, stretch=3)
-
 
         # --- grafico altitude ---
         pg.setConfigOptions(antialias=True)
         self.alt_plot = pg.PlotWidget(title="Altitude (m) vs Tempo (s)")
         self.alt_plot.showGrid(x=True, y=True, alpha=0.3)
-        self.alt_curve = self.alt_plot.plot([], [], pen=pg.mkPen(QColor(0, 150, 255), width=2))
+        self.alt_curve = self.alt_plot.plot(
+            [], [], pen=pg.mkPen(QColor(0, 150, 255), width=2)
+        )
         self.alt_plot.setMinimumHeight(250)
         right_lay.addWidget(self.alt_plot, stretch=2)
 
@@ -525,7 +538,9 @@ class GSFlightSinglePage(QWidget):
         # Drogue N
         self.pqd_drogueN = QFrame()
         self.pqd_drogueN.setFrameShape(QFrame.StyledPanel)
-        self.pqd_drogueN.setStyleSheet("background: white; border: 1px solid #ccc; border-radius: 8px;")
+        self.pqd_drogueN.setStyleSheet(
+            "background: white; border: 1px solid #ccc; border-radius: 8px;"
+        )
         self.pqd_drogueN.setMinimumSize(32, 32)
         pq_lay.addWidget(self.pqd_drogueN, 1, 0)
 
@@ -536,7 +551,9 @@ class GSFlightSinglePage(QWidget):
         # Drogue B
         self.pqd_drogueB = QFrame()
         self.pqd_drogueB.setFrameShape(QFrame.StyledPanel)
-        self.pqd_drogueB.setStyleSheet("background: white; border: 1px solid #ccc; border-radius: 8px;")
+        self.pqd_drogueB.setStyleSheet(
+            "background: white; border: 1px solid #ccc; border-radius: 8px;"
+        )
         self.pqd_drogueB.setMinimumSize(32, 32)
         pq_lay.addWidget(self.pqd_drogueB, 1, 1)
 
@@ -552,7 +569,9 @@ class GSFlightSinglePage(QWidget):
         # Main N
         self.pqd_mainN = QFrame()
         self.pqd_mainN.setFrameShape(QFrame.StyledPanel)
-        self.pqd_mainN.setStyleSheet("background: white; border: 1px solid #ccc; border-radius: 8px;")
+        self.pqd_mainN.setStyleSheet(
+            "background: white; border: 1px solid #ccc; border-radius: 8px;"
+        )
         self.pqd_mainN.setMinimumSize(32, 32)
         pq_lay.addWidget(self.pqd_mainN, 4, 0)
 
@@ -563,15 +582,15 @@ class GSFlightSinglePage(QWidget):
         # Main B
         self.pqd_mainB = QFrame()
         self.pqd_mainB.setFrameShape(QFrame.StyledPanel)
-        self.pqd_mainB.setStyleSheet("background: white; border: 1px solid #ccc; border-radius: 8px;")
+        self.pqd_mainB.setStyleSheet(
+            "background: white; border: 1px solid #ccc; border-radius: 8px;"
+        )
         self.pqd_mainB.setMinimumSize(32, 32)
         pq_lay.addWidget(self.pqd_mainB, 4, 1)
 
         # Caixa de texto embaixo do Main B
         self.mainB_text = QLabel()
         pq_lay.addWidget(self.mainB_text, 5, 1)
-
-
 
         # Definindo altura máxima do grupo
         pq_group.setMaximumHeight(200)
@@ -582,7 +601,6 @@ class GSFlightSinglePage(QWidget):
         self.drogueB_text.setText("Backup")
         self.mainN_text.setText("Normal")
         self.mainB_text.setText("Backup")
-
 
         # ========================
         #  BLOCO DE INFORMAÇÕES
@@ -611,7 +629,9 @@ class GSFlightSinglePage(QWidget):
         info_lay.addWidget(self.lbl_temp, 3, 1)
         self.sd_box = QFrame()
         self.sd_box.setFrameShape(QFrame.StyledPanel)
-        self.sd_box.setStyleSheet("background: red; border: 1px solid #ccc; border-radius: 6px;")
+        self.sd_box.setStyleSheet(
+            "background: red; border: 1px solid #ccc; border-radius: 6px;"
+        )
         self.sd_box.setMinimumSize(40, 20)
         info_lay.addWidget(self.sd_box, 5, 0, 1, 2, alignment=Qt.AlignCenter)
 
@@ -642,11 +662,19 @@ class GSFlightSinglePage(QWidget):
         gps_lay.addWidget(self.lbl_horario, 1, 0, 1, 2, alignment=Qt.AlignCenter)
 
         # Alinhamento central para Latitude e Longitude
-        gps_lay.addWidget(QLabel("Latitude:"), 2, 0, alignment=Qt.AlignCenter)  # Alinha o título
-        gps_lay.addWidget(self.lbl_lat, 3, 0, alignment=Qt.AlignCenter)         # Alinha o valor
+        gps_lay.addWidget(
+            QLabel("Latitude:"), 2, 0, alignment=Qt.AlignCenter
+        )  # Alinha o título
+        gps_lay.addWidget(
+            self.lbl_lat, 3, 0, alignment=Qt.AlignCenter
+        )  # Alinha o valor
 
-        gps_lay.addWidget(QLabel("Longitude:"), 2, 1, alignment=Qt.AlignCenter)  # Alinha o título
-        gps_lay.addWidget(self.lbl_lon, 3, 1, alignment=Qt.AlignCenter)         # Alinha o valor
+        gps_lay.addWidget(
+            QLabel("Longitude:"), 2, 1, alignment=Qt.AlignCenter
+        )  # Alinha o título
+        gps_lay.addWidget(
+            self.lbl_lon, 3, 1, alignment=Qt.AlignCenter
+        )  # Alinha o valor
 
         gps_lay.addWidget(QLabel("Distância a Base:"), 4, 0, alignment=Qt.AlignCenter)
         gps_lay.addWidget(self.lbl_dist, 4, 1, alignment=Qt.AlignCenter)
@@ -658,7 +686,9 @@ class GSFlightSinglePage(QWidget):
         # Criando a caixa da precisão
         self.lbl_precisao = QFrame()
         self.lbl_precisao.setFrameShape(QFrame.StyledPanel)
-        self.lbl_precisao.setStyleSheet("background: red; border: 1px solid #ccc; border-radius: 6px;")
+        self.lbl_precisao.setStyleSheet(
+            "background: red; border: 1px solid #ccc; border-radius: 6px;"
+        )
         self.lbl_precisao.setMinimumSize(40, 20)  # Tamanho mínimo similar ao SD Card
 
         # Adicionando a caixa de precisão ao layout
@@ -669,18 +699,15 @@ class GSFlightSinglePage(QWidget):
         gps_group.setMinimumHeight(200)
         gps_group.setMaximumWidth(200)
 
-
-
         # --- Distribuição final ---
         bottom_row.addWidget(pq_group, stretch=1)
         bottom_row.addWidget(info_group, stretch=1)
         bottom_row.addWidget(gps_group, stretch=1)
 
-
         right_lay.addLayout(bottom_row)
 
         # if os_name == "linux":
-        #     # self.left_group.hide()              
+        #     # self.left_group.hide()
         #     self._set_status("Raspberry Pi Mode", "#17d4ce")  # ciano
 
     # --- Status Serial ---
@@ -699,10 +726,12 @@ class GSFlightSinglePage(QWidget):
                 """
             )
 
-            QTimer.singleShot(120, lambda: self.serial_status_box.setStyleSheet(
-                "background:#4caf50; border:1px solid #4caf50; border-radius:4px;"
-            ))
-   
+            QTimer.singleShot(
+                120,
+                lambda: self.serial_status_box.setStyleSheet(
+                    "background:#4caf50; border:1px solid #4caf50; border-radius:4px;"
+                ),
+            )
 
         elif state == "bad":
             color = "#f44336"
@@ -725,7 +754,6 @@ class GSFlightSinglePage(QWidget):
         if time.time() - self._last_rx_time > 2.0:
             self._set_serial_status("idle")
 
-
     def toggle_map(self):
         self.map.toggle_map()
 
@@ -738,11 +766,11 @@ class GSFlightSinglePage(QWidget):
         else:
             self.btn_toggle_map.setText("Dark Map")
 
-    
-    def set_orientation(self, roll: float, pitch: float, yaw: float, degrees: bool = False):
+    def set_orientation(
+        self, roll: float, pitch: float, yaw: float, degrees: bool = False
+    ):
         """Atualiza a orientação do foguete no 3D (online/offline)."""
         self.rocket3d.set_orientation(roll, pitch, yaw, degrees)
-
 
     # ------------------ Estado ------------------
     def _reset_state(self):
@@ -762,11 +790,10 @@ class GSFlightSinglePage(QWidget):
         self.minuto: float = 0.0
 
         self.temperatura: Optional[float] = None
-        
+
         # reset paraquedas
         for i in range(4):
             self._set_pq(i, 0.0)
-
 
     # ------------------ API pública ------------------
     NAN = float("nan")
@@ -792,7 +819,7 @@ class GSFlightSinglePage(QWidget):
             "longitude": (-180.0, 180.0),
             "hora": (0, 23),
             "minuto": (0, 59),
-            "precisao": (0.0, 101.0),         # HDOP
+            "precisao": (0.0, 101.0),  # HDOP
             "altitude": (-15000.0, 15000.0),
             "sd": (0.0, 1.0),
             "apogeu_h": (-15000.0, 15000.0),
@@ -844,7 +871,6 @@ class GSFlightSinglePage(QWidget):
             return float(clean)
         except ValueError:
             return None
-
 
     # def _parse_packet(self, line: str):
     #     if not line:
@@ -928,10 +954,25 @@ class GSFlightSinglePage(QWidget):
         line = line.strip()
 
         LIST = [
-            "linha", "tempo", "latitude", "longitude", "hora", "minuto", "precisao",
-            "altitude", "sd", "apogeu_h", "apogeu_t",
-            "pqd_dn", "pqd_db", "pqd_mn", "pqd_mb",
-            "temp", "roll", "pitch", "yaw"
+            "linha",
+            "tempo",
+            "latitude",
+            "longitude",
+            "hora",
+            "minuto",
+            "precisao",
+            "altitude",
+            "sd",
+            "apogeu_h",
+            "apogeu_t",
+            "pqd_dn",
+            "pqd_db",
+            "pqd_mn",
+            "pqd_mb",
+            "temp",
+            "roll",
+            "pitch",
+            "yaw",
         ]
 
         # Tabela chave valor
@@ -940,24 +981,18 @@ class GSFlightSinglePage(QWidget):
             "T": "tempo",
             "A": "latitude",
             "O": "longitude",
-
             "h": "hora",
             "n": "minuto",
             "g": "precisao",
-
             "H": "altitude",
             "s": "sd",
-
             "a": "apogeu_h",
             "t": "apogeu_t",
-
-            "D": "pqd_dn",   
-            "d": "pqd_db",   
-            "N": "pqd_mn",   
+            "D": "pqd_dn",
+            "d": "pqd_db",
+            "N": "pqd_mn",
             "B": "pqd_mb",
-
             "c": "temp",
-
             "R": "roll",
             "P": "pitch",
             "Y": "yaw",
@@ -982,7 +1017,6 @@ class GSFlightSinglePage(QWidget):
         used_keys = set()
 
         for key_txt, value_txt in tokens:
-
             key_txt = key_txt.strip()
 
             key = TAG.get(key_txt)
@@ -1010,7 +1044,6 @@ class GSFlightSinglePage(QWidget):
 
         return raw, app
 
-
     def feed_line(self, line: str):
         self._hz_counter += 1
 
@@ -1026,7 +1059,6 @@ class GSFlightSinglePage(QWidget):
         # Mostra linha bruta original (com TAB, para debug)
         self.terminal.appendPlainText(line)
 
-
         # ---------------- STATUS SERIAL ----------------
         if not parsed:
             # string veio quebrada
@@ -1035,11 +1067,15 @@ class GSFlightSinglePage(QWidget):
 
         raw, app = parsed
 
-        #  buzzer beep a cada linha valida recebida 
+        #  buzzer beep a cada linha valida recebida
         self._serial_rx_beep()
 
         # ================= DEBUG TERMINAL =================
-        print("------- Linha {} -------".format(app["linha"] if self._is_ok(app["linha"]) else "?"))
+        print(
+            "------- Linha {} -------".format(
+                app["linha"] if self._is_ok(app["linha"]) else "?"
+            )
+        )
 
         for key, value in app.items():
             if self._is_ok(value):
@@ -1063,36 +1099,49 @@ class GSFlightSinglePage(QWidget):
 
         # ------------------------------------------------
 
-
         # ---- 1) LOGGER: salva RAW (sem NaN do filtro do app) ----
         if self.logger:
             self.logger.save_line(
-                raw["linha"], raw["tempo"], raw["latitude"], raw["longitude"],
-                raw["hora"], raw["minuto"], raw["precisao"], raw["altitude"], raw["sd"],
-                raw["apogeu_h"], raw["apogeu_t"],
-                raw["pqd_mn"], raw["pqd_dn"], raw["pqd_mb"], raw["pqd_db"],
-                raw["temp"], raw["roll"], raw["pitch"], raw["yaw"]
+                raw["linha"],
+                raw["tempo"],
+                raw["latitude"],
+                raw["longitude"],
+                raw["hora"],
+                raw["minuto"],
+                raw["precisao"],
+                raw["altitude"],
+                raw["sd"],
+                raw["apogeu_h"],
+                raw["apogeu_t"],
+                raw["pqd_mn"],
+                raw["pqd_dn"],
+                raw["pqd_mb"],
+                raw["pqd_db"],
+                raw["temp"],
+                raw["roll"],
+                raw["pitch"],
+                raw["yaw"],
             )
 
         # ---- 2) APP: usa APP (com NaN onde falhou) ----
-        linha      = app["linha"]
-        tempo      = app["tempo"]
-        latitude   = app["latitude"]
-        longitude  = app["longitude"]
-        hora       = app["hora"]
-        minuto     = app["minuto"]
-        precisao   = app["precisao"]
-        altitude   = app["altitude"]
-        sd         = app["sd"]
-        apogeu_h   = app["apogeu_h"]
-        pqd_mn     = app["pqd_mn"]
-        pqd_dn     = app["pqd_dn"]
-        pqd_mb     = app["pqd_mb"]
-        pqd_db     = app["pqd_db"]
-        temperatura= app["temp"]
-        roll       = app["roll"]
-        pitch      = app["pitch"]
-        yaw        = app["yaw"]
+        linha = app["linha"]
+        tempo = app["tempo"]
+        latitude = app["latitude"]
+        longitude = app["longitude"]
+        hora = app["hora"]
+        minuto = app["minuto"]
+        precisao = app["precisao"]
+        altitude = app["altitude"]
+        sd = app["sd"]
+        apogeu_h = app["apogeu_h"]
+        pqd_mn = app["pqd_mn"]
+        pqd_dn = app["pqd_dn"]
+        pqd_mb = app["pqd_mb"]
+        pqd_db = app["pqd_db"]
+        temperatura = app["temp"]
+        roll = app["roll"]
+        pitch = app["pitch"]
+        yaw = app["yaw"]
 
         # Auto-scroll
         if self.chk_autoscroll.isChecked():
@@ -1123,7 +1172,9 @@ class GSFlightSinglePage(QWidget):
                 color = "orange"
             else:
                 color = "red"
-            self.lbl_precisao.setStyleSheet(f"background: {color}; border: 1px solid #ccc; border-radius: 6px;")
+            self.lbl_precisao.setStyleSheet(
+                f"background: {color}; border: 1px solid #ccc; border-radius: 6px;"
+            )
 
         # altitude + gráfico
         if self._is_ok(altitude) and self._is_ok(tempo):
@@ -1143,10 +1194,13 @@ class GSFlightSinglePage(QWidget):
 
         # SD
         if self._is_ok(sd):
-            self.sd_box.setStyleSheet("background: green; border: 1px solid #ccc; border-radius: 6px;" if sd == 1 else
-                                    "background: red; border: 1px solid #ccc; border-radius: 6px;")
+            self.sd_box.setStyleSheet(
+                "background: green; border: 1px solid #ccc; border-radius: 6px;"
+                if sd == 1
+                else "background: red; border: 1px solid #ccc; border-radius: 6px;"
+            )
 
-        # Paraquedas 
+        # Paraquedas
         if self._is_ok(pqd_dn):
             self.lastvalue_dn = self._is_ok(pqd_dn)
         if self._is_ok(pqd_db):
@@ -1155,11 +1209,11 @@ class GSFlightSinglePage(QWidget):
             self.lastvalue_mn = self._is_ok(pqd_mn)
         if self._is_ok(pqd_mb):
             self.lastvalue_mb = self._is_ok(pqd_mb)
-        
+
         self._set_pq(0, pqd_dn if self._is_ok(pqd_dn) else self.lastvalue_dn)
         self._set_pq(1, pqd_db if self._is_ok(pqd_db) else self.lastvalue_db)
         self._set_pq(2, pqd_mn if self._is_ok(pqd_mn) else self.lastvalue_mn)
-        self._set_pq(3, pqd_mb if self._is_ok(pqd_mb) else self.lastvalue_mb )
+        self._set_pq(3, pqd_mb if self._is_ok(pqd_mb) else self.lastvalue_mb)
 
         if self._is_ok(temperatura):
             self.lbl_temp.setText(self._fmt(temperatura, "{:.2f}"))
@@ -1167,7 +1221,7 @@ class GSFlightSinglePage(QWidget):
         # Euler só se vierem válidos (senão não atualiza 3D)
         if self._is_ok(roll) and self._is_ok(pitch) and self._is_ok(yaw):
             self.set_orientation(roll=roll, pitch=pitch, yaw=yaw, degrees=True)
-    
+
     @Slot()
     def _update_hz_display(self):
         now = time.time()
@@ -1181,10 +1235,9 @@ class GSFlightSinglePage(QWidget):
 
             self.lbl_serial_hz.setText(f"{self._hz_value:.1f} Hz")
 
-
-    def _safe_convert(self, value, tipo,  value_type="float"):
+    def _safe_convert(self, value, tipo, value_type="float"):
         """Tenta converter o valor para o tipo adequado (float ou int). Retorna '~' se não for possível converter."""
-        
+
         if value in (None, "", "-"):
             return tipo  # Para valores None, vazios ou '-'
 
@@ -1196,9 +1249,6 @@ class GSFlightSinglePage(QWidget):
         except (ValueError, TypeError):
             return tipo  # Retorna '~' se a conversão falhar
 
-        
-
-
     # ---------- Métodos para a Config ----------
     def set_position(self, lat: float, lon: float):
         """Força a posição no mapa/infos (modo teste)."""
@@ -1206,7 +1256,6 @@ class GSFlightSinglePage(QWidget):
         self.lbl_lon.setText(f"{lon:.6f}")
         self.last_latlon = (lat, lon)
         self.map.set_position(lat, lon)
-
 
     def inject_altitude(self, alt: float, t: Optional[float] = None):
         """Injeta altitude manual (modo teste)."""
@@ -1234,8 +1283,6 @@ class GSFlightSinglePage(QWidget):
         if hasattr(self, "map"):
             self.map.set_base(lat, lon)
 
-
-
     def _set_pq(self, idx: int, height: float):
         """
         Atualiza a cor de cada paraquedas com base na altura de abertura (height).
@@ -1244,14 +1291,13 @@ class GSFlightSinglePage(QWidget):
         """
         # Define cor e borda
         if height not in (None, 0.0):
-            color = "#b6f5b6"   # verde claro
+            color = "#b6f5b6"  # verde claro
             border = "#4caf50"
         else:
-            color = "#e0e0e0"   # cinza
+            color = "#e0e0e0"  # cinza
             border = "#aaa"
 
         style = f"background: {color}; border: 1px solid {border}; border-radius: 8px;"
-
 
         if sys.platform.startswith("linux"):
             if idx == 0:
@@ -1310,8 +1356,10 @@ class GSFlightSinglePage(QWidget):
         p3t = 0.0
         p4t = 0.0
 
-        line = f"{self._sim_t:.2f}\t{self._sim_lat:.6f}\t{self._sim_lon:.6f}\t{apogee:.2f}\t{alt:.2f}\t" \
-               f"{alt:.2f}\t{p1t:.2f}\t{alt-10:.2f}\t{p2t:.2f}\t0\t0"
+        line = (
+            f"{self._sim_t:.2f}\t{self._sim_lat:.6f}\t{self._sim_lon:.6f}\t{apogee:.2f}\t{alt:.2f}\t"
+            f"{alt:.2f}\t{p1t:.2f}\t{alt - 10:.2f}\t{p2t:.2f}\t0\t0"
+        )
         self.feed_line(line)
 
     # ---------- serial --------------
@@ -1334,9 +1382,9 @@ class GSFlightSinglePage(QWidget):
             self._rx_buf += chunk
 
             # -------- Proteções anti-lag / anti-buffer infinito --------
-            MAX_LINES_PER_TICK = 50          # processa no máximo 50 linhas por tick do timer
-            MAX_BUF_BYTES = 256_000          # corta buffer se crescer demais (256 KB)
-            MAX_LINE_BYTES = 4096            # descarta linha absurda (>4 KB)
+            MAX_LINES_PER_TICK = 50  # processa no máximo 50 linhas por tick do timer
+            MAX_BUF_BYTES = 256_000  # corta buffer se crescer demais (256 KB)
+            MAX_LINE_BYTES = 4096  # descarta linha absurda (>4 KB)
 
             # se buffer explodiu (ex.: sem \n por muito tempo), corta o mais antigo
             if len(self._rx_buf) > MAX_BUF_BYTES:
@@ -1363,7 +1411,6 @@ class GSFlightSinglePage(QWidget):
         except Exception as e:
             print("Erro serial (read_serial):", e)
 
-
     def _clear_terminal(self):
         """Limpa o terminal e, se não houver conexão ativa, reseta o status."""
         self.terminal.clear()
@@ -1377,28 +1424,37 @@ class GSFlightSinglePage(QWidget):
     def refresh_ports(self):
         """Atualiza a lista de portas COM disponíveis (ignora Bluetooth/virtuais)."""
         import serial.tools.list_ports
+
         self.combo_ports.clear()
 
         for port in serial.tools.list_ports.comports():
             desc = port.description.lower()
             device = port.device
 
-            if "bluetooth" in desc: # ignora portas BT
+            if "bluetooth" in desc:  # ignora portas BT
                 continue
 
-            if device in ["COM3", "COM4"]: # ignora portas padrão
+            if device in ["COM3", "COM4"]:  # ignora portas padrão
                 continue
 
-            # if self.is_linux:
-            #     if not any(x in device for x in ["ttyS", "ttyAMA", "ttyUSB", "ttyACM"]):
-            #         continue
+            if self.is_linux:
+                if not any(x in device for x in ["ttyUSB", "ttyACM"]):
+                    continue
 
             self.combo_ports.addItem(device)
 
-        
         # se não achar nenhuma porta
         if self.combo_ports.count() == 0:
             self.combo_ports.addItem("")  # placeholder vazio
+
+        # Seleciona /dev/ttyUSB0 por padrão no Linux
+        if self.is_linux:
+            idx = self.combo_ports.findText("/dev/ttyUSB0")
+            if idx >= 0:
+                self.combo_ports.setCurrentIndex(idx)
+            else:
+                self.combo_ports.insertItem(0, "/dev/ttyUSB0")
+                self.combo_ports.setCurrentIndex(0)
 
     def connect_serial(self):
         """Conecta na porta escolhida e faz handshake robusto com READY / GPS_COORDS."""
@@ -1411,16 +1467,35 @@ class GSFlightSinglePage(QWidget):
 
         try:
             if self.connected_ok and self.ser and self.ser.is_open:
-                QMessageBox.information(self, "Conexão", f"Já está conectado em {self.ser.port}")
+                QMessageBox.information(
+                    self, "Conexão", f"Já está conectado em {self.ser.port}"
+                )
                 return
 
             if self.logger:
-                self.logger.write_header([
-                    "linha", "tempo.s", "lat.GPS", "lon.GPS", "hora.GPS", "min.GPS",
-                    "precisao.GPS", "baro.h.m", "sd.ok.bool", "apogeu.h.m", "apogeu.t.s",
-                    "pqd.mainN.m", "pqd.drogueN.m", "pqd.mainB.m", "pqd.drogueB.m",
-                    "temperatura", "roll", "pitch", "yaw"
-                ])
+                self.logger.write_header(
+                    [
+                        "linha",
+                        "tempo.s",
+                        "lat.GPS",
+                        "lon.GPS",
+                        "hora.GPS",
+                        "min.GPS",
+                        "precisao.GPS",
+                        "baro.h.m",
+                        "sd.ok.bool",
+                        "apogeu.h.m",
+                        "apogeu.t.s",
+                        "pqd.mainN.m",
+                        "pqd.drogueN.m",
+                        "pqd.mainB.m",
+                        "pqd.drogueB.m",
+                        "temperatura",
+                        "roll",
+                        "pitch",
+                        "yaw",
+                    ]
+                )
 
             # abre serial
             self.ser = serial.Serial(port, 115200, timeout=0.2)
@@ -1459,7 +1534,7 @@ class GSFlightSinglePage(QWidget):
                     expected="OK",
                     timeout_s=12.0,
                     busy=busy,
-                    busy_text="Aguardando OK da telemetria..."
+                    busy_text="Aguardando OK da telemetria...",
                 )
 
                 if not ok:
@@ -1469,10 +1544,7 @@ class GSFlightSinglePage(QWidget):
                 self._set_status(f"Solicitando coordenadas em {port}...", "#17d4ce")
                 self.ser.write(b"GPS_COORDS\n")
 
-                gps_line = self._wait_for_gps_result(
-                    timeout_s=15.0,
-                    busy=busy
-                )
+                gps_line = self._wait_for_gps_result(timeout_s=15.0, busy=busy)
 
                 lat = None
                 lon = None
@@ -1492,13 +1564,13 @@ class GSFlightSinglePage(QWidget):
                     QMessageBox.information(
                         self,
                         "Localização obtida do GPS",
-                        f"Lat: {lat:.6f}, Lon: {lon:.6f}"
+                        f"Lat: {lat:.6f}, Lon: {lon:.6f}",
                     )
                 else:
                     QMessageBox.warning(
                         self,
                         "GPS",
-                        "Não foi possível obter coordenadas válidas no tempo limite.\nSerial conectada com sucesso!"
+                        "Não foi possível obter coordenadas válidas no tempo limite.\nSerial conectada com sucesso!",
                     )
 
                 # 5) drena rapidamente o que restou do handshake/header
@@ -1512,12 +1584,16 @@ class GSFlightSinglePage(QWidget):
             finally:
                 busy.close()
 
-            
-            self.terminal.appendPlainText("                                                                                                 UFABC Rocket Design")
-            self.terminal.appendPlainText("                                                                                                 Ground Station Online")
-            self.terminal.appendPlainText("-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------")
+            self.terminal.appendPlainText(
+                "                                                                                                 UFABC Rocket Design"
+            )
+            self.terminal.appendPlainText(
+                "                                                                                                 Ground Station Online"
+            )
+            self.terminal.appendPlainText(
+                "-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------"
+            )
 
-            
             self.timer_serial.start(50)
 
         except serial.SerialException as e:
@@ -1532,7 +1608,7 @@ class GSFlightSinglePage(QWidget):
             QMessageBox.warning(
                 self,
                 "Erro",
-                f"Acesso negado à porta {port}. Feche outros programas que estejam usando essa COM."
+                f"Acesso negado à porta {port}. Feche outros programas que estejam usando essa COM.",
             )
             self._reset_button_styles()
 
@@ -1542,7 +1618,9 @@ class GSFlightSinglePage(QWidget):
             QMessageBox.warning(self, "Erro", f"Erro inesperado:\n{e}")
             self._reset_button_styles()
 
-    def _force_disconnect_serial(self, reason: str = "Desconectado", send_rst: bool = False):
+    def _force_disconnect_serial(
+        self, reason: str = "Desconectado", send_rst: bool = False
+    ):
         ser = self.ser
 
         try:
@@ -1601,7 +1679,6 @@ class GSFlightSinglePage(QWidget):
         except Exception:
             pass
 
-
     def disconnect_serial(self):
 
         if self.ser is None:
@@ -1609,11 +1686,8 @@ class GSFlightSinglePage(QWidget):
             self._reset_button_styles()
             return
 
-        self._force_disconnect_serial(
-            reason="Desconectado",
-            send_rst=True
-        )
-        
+        self._force_disconnect_serial(reason="Desconectado", send_rst=True)
+
     # def disconnect_serial(self):
     #     """Desconecta, envia RST e pisca vermelho."""
     #     if self.ser and self.ser.is_open:
@@ -1650,7 +1724,6 @@ class GSFlightSinglePage(QWidget):
         except Exception:
             return ""
 
-
     def _is_boot_noise_line(self, line: str) -> bool:
         if not line:
             return True
@@ -1677,7 +1750,6 @@ class GSFlightSinglePage(QWidget):
 
         return False
 
-
     def _is_header_line(self, line: str) -> bool:
         s = (line or "").strip()
         if not s:
@@ -1689,16 +1761,9 @@ class GSFlightSinglePage(QWidget):
             or s.startswith("---")
         )
 
-
     def _is_sat_status_line(self, line: str) -> bool:
         s = (line or "").strip().upper()
-        return (
-            "SAT" in s
-            or "SATS" in s
-            or "SATELITE" in s
-            or "SATÉLITE" in s
-        )
-
+        return "SAT" in s or "SATS" in s or "SATELITE" in s or "SATÉLITE" in s
 
     def _is_valid_coord_line(self, line: str) -> bool:
         s = (line or "").strip()
@@ -1716,7 +1781,6 @@ class GSFlightSinglePage(QWidget):
             return True
         except Exception:
             return False
-
 
     def _append_handshake_line(self, line: str):
         """
@@ -1736,7 +1800,6 @@ class GSFlightSinglePage(QWidget):
                 self.terminal.verticalScrollBar().maximum()
             )
 
-
     def _drain_serial_input(self, seconds: float = 1.0):
         """
         Drena a serial por um curto período para limpar ruído de boot/reset.
@@ -1749,8 +1812,9 @@ class GSFlightSinglePage(QWidget):
                 self._append_handshake_line(line)
             time.sleep(0.01)
 
-
-    def _wait_for_token(self, expected: str, timeout_s: float, busy=None, busy_text: str = "") -> bool:
+    def _wait_for_token(
+        self, expected: str, timeout_s: float, busy=None, busy_text: str = ""
+    ) -> bool:
         """
         Aguarda uma linha exatamente igual a 'expected'.
         Ignora ruído de boot e outros prints soltos.
@@ -1780,7 +1844,6 @@ class GSFlightSinglePage(QWidget):
                 return True
 
         return False
-
 
     def _wait_for_gps_result(self, timeout_s: float, busy=None) -> str:
         """
@@ -1846,7 +1909,6 @@ class GSFlightSinglePage(QWidget):
 
         return "~\t~"
 
-
     def _cleanup_serial_on_error(self):
         try:
             if self.timer_serial.isActive():
@@ -1862,22 +1924,25 @@ class GSFlightSinglePage(QWidget):
 
         self.ser = None
         self.connected_ok = False
+
     def _reset_button_styles(self):
         """Reseta as cores de Connect/Disconnect para neutro."""
         self.btn_connect.setStyleSheet("")
         self.btn_disconnect.setStyleSheet("")
-    
+
     def _set_status(self, msg: str, color: str = "#666"):
         """Atualiza a barra de status com texto e cor."""
         self.lbl_status.setText(msg)
-        self.lbl_status.setStyleSheet(f"color:{color}; font-weight:500; padding:4px; border-top:1px solid #ccc;")
+        self.lbl_status.setStyleSheet(
+            f"color:{color}; font-weight:500; padding:4px; border-top:1px solid #ccc;"
+        )
 
     def _show_busy_dialog(self, text: str):
         dlg = BusySpinnerDialog(text, self)
         dlg.show()
         QApplication.processEvents()
         return dlg
-    
+
     def _serial_rx_beep(self):
         if not self.serial_beep_enabled:
             return
@@ -1895,13 +1960,14 @@ class GSFlightSinglePage(QWidget):
 
             elif self._beep_mode == "winsound":
                 import winsound
+
                 # winsound.MessageBeep()
                 # alternativa:
                 winsound.Beep(600, 60)
 
         except Exception:
             pass
-    
+
     def set_serial_beep_enabled(self, enabled: bool):
         self.serial_beep_enabled = bool(enabled)
 
@@ -1921,11 +1987,11 @@ class GSFlightSinglePage(QWidget):
             self.plot_time.clear()
         if hasattr(self, "plot_alt"):
             self.plot_alt.clear()
+
     # Net
     def onNetChanged(self, status: bool):
         self.apply_map_mode()
 
-    
     # -------- Controle de execução --------
     def pause(self):
         # mapa
@@ -1946,28 +2012,24 @@ class GSFlightSinglePage(QWidget):
             self.rocket3d.resume()
 
     def ask_logger(self):
-            reply = QMessageBox.question(
+        reply = QMessageBox.question(
+            self,
+            "Salvar Dados?",
+            "Deseja salvar os dados desta sessão em arquivo?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+
+        if reply == QMessageBox.Yes:
+            filename, _ = QFileDialog.getSaveFileName(
                 self,
-                "Salvar Dados?",
-                "Deseja salvar os dados desta sessão em arquivo?",
-                QMessageBox.Yes | QMessageBox.No
+                "Escolher local para salvar log",
+                f"log_{time.strftime('%Y%m%d_%H%M%S')}.txt",
+                "Text Files (*.txt)",
             )
-
-            if reply == QMessageBox.Yes:
-                filename, _ = QFileDialog.getSaveFileName(
-                    self,
-                    "Escolher local para salvar log",
-                    f"log_{time.strftime('%Y%m%d_%H%M%S')}.txt",
-                    "Text Files (*.txt)"
-                )
-                if filename:
-                    self.logger = Logger(filename)
-                else:
-                    self.logger = None
-
-
-
-
+            if filename:
+                self.logger = Logger(filename)
+            else:
+                self.logger = None
 
 
 # ---------- utils ----------
@@ -1991,7 +2053,8 @@ def _haversine_m(a: Tuple[float, float], b: Tuple[float, float]) -> float:
     lat2, lon2 = math.radians(b[0]), math.radians(b[1])
     dlat = lat2 - lat1
     dlon = lon2 - lon1
-    h = math.sin(dlat/2)**2 + math.cos(lat1)*math.cos(lat2)*math.sin(dlon/2)**2
+    h = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    )
     return 2 * R * math.asin(math.sqrt(h))
-
-

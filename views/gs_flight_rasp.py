@@ -24,6 +24,13 @@ class GSFlightRaspPage(GSFlightSinglePage):
     Reaproveita a lógica da GSFlightSinglePage e troca apenas o layout
     para a versão do Raspberry / tela menor.
     """
+    def __init__(self, net_manager, parent=None):
+        self.previous_channel_hex = None
+        self.previous_address_hex = None
+        self.current_channel_hex = "2A"  # Default CHAN 42 (0x2A)
+        self.current_address_hex = "002A" # Default 0x002A
+        super().__init__(net_manager, parent)
+
     def _make_info_card(self, title: str, value_label: QLabel) -> QFrame:
         card = QFrame()
         card.setObjectName("infoCard")
@@ -475,13 +482,28 @@ class GSFlightRaspPage(GSFlightSinglePage):
         self.btn_lora_force_change.setMinimumWidth(90)
         self.btn_lora_force_change.setToolTip("Força a troca apenas na Ground Station.")
 
+        self.btn_lora_default = QPushButton("GS Default")
+        self.btn_lora_default.setMinimumWidth(95)
+        self.btn_lora_default.setToolTip("Força a Ground Station para a configuração padrão (CHAN42 / 0x002A).")
+
+        self.btn_lora_previous = QPushButton("GS Anterior")
+        self.btn_lora_previous.setMinimumWidth(95)
+        self.btn_lora_previous.setToolTip("Força a Ground Station para a configuração ativa anterior.")
+
+        self.btn_lora_sweep = QPushButton("Vasculhar")
+        self.btn_lora_sweep.setMinimumWidth(95)
+        self.btn_lora_sweep.setToolTip("Varre todos os 70 canais (862 a 931 MHz) em busca do sinal do Embedded.")
+
+        lora_cfg_row.addWidget(self.btn_lora_default)
+        lora_cfg_row.addWidget(self.btn_lora_previous)
+        lora_cfg_row.addWidget(self.btn_lora_sweep)
+        lora_cfg_row.addWidget(self.btn_lora_force_change)
         lora_cfg_row.addStretch(1)
         lora_cfg_row.addWidget(QLabel("Freq/CHAN:"))
         lora_cfg_row.addWidget(self.combo_lora_freq)
         lora_cfg_row.addWidget(QLabel("Address HEX:"))
         lora_cfg_row.addWidget(self.input_lora_addr)
         lora_cfg_row.addWidget(self.btn_lora_change)
-        lora_cfg_row.addWidget(self.btn_lora_force_change)
         
         # -------- status serial em cima --------
         self.serial_block = QWidget()
@@ -590,8 +612,293 @@ class GSFlightRaspPage(GSFlightSinglePage):
         )
         self.btn_lora_change.clicked.connect(self._send_lora_change_config)
         self.btn_lora_force_change.clicked.connect(self._send_lora_forced_change_config)
+        self.btn_lora_default.clicked.connect(self._change_to_default_config)
+        self.btn_lora_previous.clicked.connect(self._change_to_previous_config)
+        self.btn_lora_sweep.clicked.connect(self._sweep_lora_channels)
     
     def _send_lora_forced_change_config(self):
+        self._send_lora_change_config(forced=True)
+
+    def _change_to_default_config(self):
+        self.combo_lora_freq.setCurrentText("FREQ904 / CHAN42")
+        self.input_lora_addr.setText("0x002A")
+        self._send_lora_change_config(forced=True)
+
+    def _change_to_previous_config(self):
+        if not hasattr(self, "previous_channel_hex") or not self.previous_channel_hex:
+            QMessageBox.warning(self, "LoRa", "Nenhuma configuração anterior registrada nesta sessão.")
+            return
+        
+        # Convert previous_channel_hex back to decimal
+        chan_dec = int(self.previous_channel_hex, 10)
+        freq_mhz = 862 + chan_dec
+        
+        self.combo_lora_freq.setCurrentText(f"FREQ{freq_mhz} / CHAN{chan_dec}")
+        self.input_lora_addr.setText(f"0x{self.previous_address_hex}")
+        self._send_lora_change_config(forced=True)
+
+    def _sweep_lora_channels(self):
+        """
+        Varre os canais e endereços em busca de telemetria válida do Embedded.
+        Primeiro busca na lista presetada (histórico + Tabela 2 do IREC PDF).
+        Se não encontrar, realiza a varredura completa.
+        """
+        if not self.ser or not self.ser.is_open or not self.connected_ok:
+            QMessageBox.warning(self, "LoRa", "A placa não está conectada.")
+            return
+
+        def parse_address_hex_from_ui() -> str:
+            text = self.input_lora_addr.text().strip().upper()
+            if not text:
+                raise ValueError("Digite o Address.")
+            if text.startswith("0X"):
+                text = text[2:]
+            if len(text) != 4 or not all(c in "0123456789ABCDEF" for c in text):
+                raise ValueError("Address inválido.")
+            return text
+
+        try:
+            address_ui = parse_address_hex_from_ui()
+        except ValueError:
+            address_ui = "002A"
+
+        # Dedup e prepara endereços a testar (com base no histórico e range de interesse)
+        addresses = []
+        for addr in [address_ui, "B7A2", "002A", "0017", "012A", "0000", "B6C7", "B1C7", "002B", "FFFF"]:
+            addr = addr.upper().strip()
+            if addr.startswith("0X"):
+                addr = addr[2:]
+            addr = addr.zfill(4)
+            if addr not in addresses:
+                addresses.append(addr)
+
+        # Canais presetados (Histórico/Atual: 67, 42, 32, 69, 29; Tabela 2 IREC SRAD: 40, 41, 43, 44, 45, 46, 47)
+        preset_channels = [67, 42, 32, 69, 29, 40, 41, 43, 44, 45, 46, 47]
+        
+        # Constrói a lista completa de canais
+        all_channels = list(range(70))
+        
+        # Filtra os canais da varredura completa para não repetir os presetados
+        remaining_channels = [c for c in all_channels if c not in preset_channels]
+
+        # Constrói a sequência de testes: (canal, endereço, fase)
+        test_sequence = []
+        
+        # Fase 1: Presetados (Tenta todas as combinações de canais prioritários e endereços conhecidos)
+        for chan in preset_channels:
+            for addr in addresses:
+                test_sequence.append((chan, addr, "Presetado"))
+                
+        # Fase 2: Varredura Completa (Varia todas as frequências e todos os endereços)
+        for chan in remaining_channels:
+            for addr in addresses:
+                test_sequence.append((chan, addr, "Completo"))
+
+        total_steps = len(test_sequence)
+
+        # Pausa o leitor serial normal
+        timer_was_active = False
+        try:
+            timer_was_active = self.timer_serial.isActive()
+        except Exception:
+            timer_was_active = False
+
+        busy = None
+
+        try:
+            self.btn_lora_change.setEnabled(False)
+            self.btn_lora_force_change.setEnabled(False)
+            self.btn_lora_default.setEnabled(False)
+            self.btn_lora_previous.setEnabled(False)
+            if hasattr(self, "btn_lora_sweep"):
+                self.btn_lora_sweep.setEnabled(False)
+
+            if timer_was_active:
+                self.timer_serial.stop()
+
+            try:
+                self.ser.reset_input_buffer()
+                self.ser.reset_output_buffer()
+            except Exception:
+                pass
+
+            busy = QProgressDialog(
+                "Iniciando varredura LoRa...",
+                "Cancelar",
+                0,
+                total_steps,
+                self
+            )
+            busy.setWindowTitle("Varredura LoRa")
+            busy.setWindowModality(Qt.WindowModal)
+            busy.setMinimumDuration(0)
+            busy.show()
+
+            self._set_status("Varrendo...", "#d4a017")
+            self.terminal.appendPlainText(f"\n[SCAN] Iniciando varredura com {total_steps} configurações...")
+
+            found_config = None
+            
+            def is_telemetry_line(line: str) -> bool:
+                line = line.strip()
+                if not line:
+                    return False
+                if "[" in line or "]" in line:
+                    return False
+                if any(x in line for x in ["Starting", "MUDAR", "OK", "ERROR", "Timeout"]):
+                    return False
+                # Telemetria real possui pelo menos 10 colunas separadas por tabs (\t)
+                if line.count("\t") >= 10:
+                    return True
+                return False
+
+            for step_idx, (chan_dec, addr_hex, phase) in enumerate(test_sequence):
+                if busy.wasCanceled():
+                    self.terminal.appendPlainText("[SCAN] Varredura cancelada pelo usuário.")
+                    break
+
+                freq_mhz = 862 + chan_dec
+                busy.setValue(step_idx)
+                busy.setLabelText(
+                    f"Fase: {phase} ({step_idx + 1}/{total_steps})\n"
+                    f"FREQ: {freq_mhz} MHz / CHAN: {chan_dec}\n"
+                    f"Address: 0x{addr_hex}"
+                )
+                QApplication.processEvents()
+
+                channel_str = str(chan_dec)
+                request_packet = "MUDAR_AGORA"
+                vals_packet = f"VALS:CHAN{channel_str}_{addr_hex}"
+
+                self.terminal.appendPlainText(f"[SCAN][{phase}] Testando FREQ{freq_mhz} (CHAN{chan_dec}) ADDR 0x{addr_hex}...")
+
+                # Limpa buffer serial antes de enviar comandos para que respostas antigas sejam ignoradas
+                try:
+                    self.ser.reset_input_buffer()
+                except Exception:
+                    pass
+
+                # Envia comandos para GS
+                try:
+                    self.ser.write((request_packet + "\n").encode("utf-8"))
+                    
+                    # Espera 150ms mantendo UI responsiva
+                    t_delay = time.time()
+                    while (time.time() - t_delay) < 0.15:
+                        QApplication.processEvents()
+                        time.sleep(0.01)
+
+                    self.ser.write((vals_packet + "\n").encode("utf-8"))
+                except Exception as e:
+                    self.terminal.appendPlainText(f"[SCAN ERROR] Falha ao enviar comandos na serial: {e}")
+                    break
+
+                # Espera MUDAR_AGORA_OK
+                ok_received = False
+                start_t = time.time()
+                while (time.time() - start_t) < 3.0:
+                    QApplication.processEvents()
+                    line = self._readline_decoded()
+                    if line:
+                        line = line.strip()
+                        if "MUDAR_AGORA_OK" in line:
+                            ok_received = True
+                            break
+                        elif "MUDAR_ERRO" in line or "MUDAR_AGORA_ERRO" in line:
+                            self.terminal.appendPlainText(f"  → GS reportou erro: {line}")
+                            break
+                    time.sleep(0.01)
+
+                if not ok_received:
+                    self.terminal.appendPlainText(f"  → GS não respondeu MUDAR_AGORA_OK. Pulando...")
+                    continue
+
+                # Espera telemetria do Embedded
+                self.terminal.appendPlainText("  → GS configurado. Ouvindo rádio por telemetria...")
+                telemetry_received = False
+                start_t = time.time()
+                while (time.time() - start_t) < 2.0:
+                    QApplication.processEvents()
+                    line = self._readline_decoded()
+                    if line:
+                        line = line.strip()
+                        if is_telemetry_line(line):
+                            self.terminal.appendPlainText(f"  → Recebeu telemetria: {line}")
+                            telemetry_received = True
+                            break
+                    time.sleep(0.01)
+
+                if telemetry_received:
+                    found_config = (chan_dec, addr_hex)
+                    self.terminal.appendPlainText(f"\n[SCAN SUCCESS] Conectado com sucesso em FREQ{freq_mhz} / CHAN{chan_dec} ADDR 0x{addr_hex}!")
+                    break
+
+            if found_config is not None:
+                chan_val, addr_val = found_config
+                self.combo_lora_freq.setCurrentText(f"FREQ{862 + chan_val} / CHAN{chan_val}")
+                self.input_lora_addr.setText(f"0x{addr_val}")
+                
+                if hasattr(self, "current_channel_hex") and self.current_channel_hex:
+                    self.previous_channel_hex = self.current_channel_hex
+                    self.previous_address_hex = self.current_address_hex
+                self.current_channel_hex = str(chan_val)
+                self.current_address_hex = addr_val
+
+                QMessageBox.information(
+                    self,
+                    "Varredura LoRa",
+                    f"Conexão com o foguete restabelecida com sucesso!\n\n"
+                    f"Frequência: FREQ{862 + chan_val} (CHAN{chan_val})\n"
+                    f"Address: 0x{addr_val}"
+                )
+                self._set_status(f"Conectado: CHAN{chan_val:02d}", "#060")
+            else:
+                if not busy.wasCanceled():
+                    QMessageBox.warning(
+                        self,
+                        "Varredura LoRa",
+                        "A varredura terminou, mas nenhuma telemetria do Embedded foi encontrada em nenhuma das configurações testadas.\n\n"
+                        "Certifique-se de que o computador de voo está ligado e transmitindo no rádio."
+                    )
+                    self._set_status("Varredura concluída (sem sinal)", "#b00")
+
+        except Exception as e:
+            self._set_status("Erro na varredura", "#b00")
+            QMessageBox.critical(self, "Varredura LoRa", f"Erro inesperado durante a varredura:\n{e}")
+
+        finally:
+            if busy is not None:
+                busy.close()
+
+            self.btn_lora_change.setEnabled(True)
+            self.btn_lora_force_change.setEnabled(True)
+            self.btn_lora_default.setEnabled(True)
+            self.btn_lora_previous.setEnabled(True)
+            if hasattr(self, "btn_lora_sweep"):
+                self.btn_lora_sweep.setEnabled(True)
+
+            if timer_was_active and self.ser and self.ser.is_open and self.connected_ok:
+                self.timer_serial.start(50)
+    
+    def _send_lora_forced_change_config(self):
+        self._send_lora_change_config(forced=True)
+
+    def _change_to_default_config(self):
+        self.combo_lora_freq.setCurrentText("FREQ904 / CHAN42")
+        self.input_lora_addr.setText("0x002A")
+        self._send_lora_change_config(forced=True)
+
+    def _change_to_previous_config(self):
+        if not hasattr(self, "previous_channel_hex") or not self.previous_channel_hex:
+            QMessageBox.warning(self, "LoRa", "Nenhuma configuração anterior registrada nesta sessão.")
+            return
+        
+        # Convert previous_channel_hex back to decimal
+        chan_dec = int(self.previous_channel_hex, 16)
+        freq_mhz = 862 + chan_dec
+        
+        self.combo_lora_freq.setCurrentText(f"FREQ{freq_mhz} / CHAN{chan_dec}")
+        self.input_lora_addr.setText(f"0x{self.previous_address_hex}")
         self._send_lora_change_config(forced=True)
 
 
@@ -702,7 +1009,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
                 item_data = self.combo_lora_freq.itemData(current_index)
 
                 if text == item_text and item_data:
-                    return str(item_data).upper().zfill(2)
+                    return str(item_data)
 
             # Aceita:
             # FREQ903 / CHAN29
@@ -720,15 +1027,18 @@ class GSFlightRaspPage(GSFlightSinglePage):
 
                 chan_text = parts[0].strip().upper()
 
-                if not is_hex_text(chan_text, 2):
-                    raise ValueError("O CHAN deve ter exatamente 2 casas hexadecimais. Exemplo: 29 ou C3.")
+                try:
+                    if chan_text.isdigit():
+                        chan_value = int(chan_text, 10)
+                    else:
+                        chan_value = int(chan_text, 16)
+                except ValueError:
+                    raise ValueError("CHAN inválido.")
 
-                chan_value = int(chan_text, 16)
+                if chan_value < 0 or chan_value > 69:
+                    raise ValueError("O canal deve estar entre 0 e 69.")
 
-                if chan_value < 0x00 or chan_value > 0xFF:
-                    raise ValueError("O CHAN deve estar entre 00 e FF.")
-
-                return chan_text
+                return str(chan_value)
 
             # Aceita:
             # FREQ903
@@ -751,7 +1061,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
                 if freq_value < 862 or freq_value > 931:
                     raise ValueError("A frequência deve estar entre FREQ862 e FREQ931.")
 
-                return f"{freq_value - 862:02X}"
+                return str(freq_value - 862)
 
             # Aceita:
             # 903
@@ -761,28 +1071,21 @@ class GSFlightRaspPage(GSFlightSinglePage):
                 if freq_value < 862 or freq_value > 931:
                     raise ValueError("A frequência deve estar entre 862 e 931 MHz.")
 
-                return f"{freq_value - 862:02X}"
+                return str(freq_value - 862)
 
-            # Aceita:
-            # 29
-            # C3
-            if is_hex_text(text, 2):
-                chan_value = int(text, 16)
+            # Aceita: hex ou dec de 2 caracteres
+            try:
+                if text.isdigit():
+                    chan_value = int(text, 10)
+                else:
+                    chan_value = int(text, 16)
+            except ValueError:
+                raise ValueError("Canal inválido.")
 
-                if chan_value < 0x00 or chan_value > 0xFF:
-                    raise ValueError("O CHAN deve estar entre 00 e FF.")
+            if chan_value < 0 or chan_value > 69:
+                raise ValueError("O canal deve estar entre 0 e 69.")
 
-                return text.upper()
-
-            raise ValueError(
-                "Campo de frequência/canal inválido.\n\n"
-                "Use um dos formatos:\n"
-                "FREQ903\n"
-                "903\n"
-                "CHAN29\n"
-                "29\n"
-                "C3"
-            )
+            return str(chan_value)
 
         def parse_address_hex_from_ui() -> str:
             text = self.input_lora_addr.text().strip().upper()
@@ -920,6 +1223,10 @@ class GSFlightRaspPage(GSFlightSinglePage):
 
             if hasattr(self, "btn_lora_force_change"):
                 self.btn_lora_force_change.setEnabled(False)
+            if hasattr(self, "btn_lora_default"):
+                self.btn_lora_default.setEnabled(False)
+            if hasattr(self, "btn_lora_previous"):
+                self.btn_lora_previous.setEnabled(False)
 
             if timer_was_active:
                 self.timer_serial.stop()
@@ -993,6 +1300,12 @@ class GSFlightRaspPage(GSFlightSinglePage):
                     return
 
                 if forced_response == "MUDAR_AGORA_OK":
+                    if hasattr(self, "current_channel_hex") and self.current_channel_hex:
+                        self.previous_channel_hex = self.current_channel_hex
+                        self.previous_address_hex = self.current_address_hex
+                    self.current_channel_hex = channel_hex
+                    self.current_address_hex = address_hex
+
                     finish_success(
                         f"LoRa forçado: CHAN{channel_hex}, 0x{address_hex}",
                         "Configuração LoRa forçada com sucesso na Ground Station.\n\n"
@@ -1073,6 +1386,12 @@ class GSFlightRaspPage(GSFlightSinglePage):
                 return
 
             if final_response == "MUDAR_CERTO":
+                if hasattr(self, "current_channel_hex") and self.current_channel_hex:
+                    self.previous_channel_hex = self.current_channel_hex
+                    self.previous_address_hex = self.current_address_hex
+                self.current_channel_hex = channel_hex
+                self.current_address_hex = address_hex
+
                 finish_success(
                     f"LoRa alterado: CHAN{channel_hex}, 0x{address_hex}",
                     "Configuração LoRa alterada com sucesso.\n\n"
@@ -1102,6 +1421,10 @@ class GSFlightRaspPage(GSFlightSinglePage):
 
             if hasattr(self, "btn_lora_force_change"):
                 self.btn_lora_force_change.setEnabled(True)
+            if hasattr(self, "btn_lora_default"):
+                self.btn_lora_default.setEnabled(True)
+            if hasattr(self, "btn_lora_previous"):
+                self.btn_lora_previous.setEnabled(True)
 
             if timer_was_active and self.ser and self.ser.is_open and self.connected_ok:
                 self.timer_serial.start(50)

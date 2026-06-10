@@ -826,10 +826,10 @@ def main():
     win = MainWindow()
 
     if sys.platform.startswith("linux"):
+        win.showMaximized()
+    else:
         win.setWindowFlags(Qt.FramelessWindowHint)
         win.showFullScreen()
-    else:
-        win.showMaximized()
 
     # QTimer.singleShot(250, play_startup_chime)
     
