@@ -385,14 +385,6 @@ class GSFlightRaspPage(GSFlightSinglePage):
         infos_col_lay.addWidget(info_group)
         infos_col_lay.addWidget(gps_group)
         infos_col_lay.addStretch(1)
-        
-        self.sd_box = QFrame()
-        self.sd_box.setFrameShape(QFrame.StyledPanel)
-        self.sd_box.setMinimumSize(40, 18)
-        self.sd_box.setMaximumHeight(18)
-        self.sd_box.setStyleSheet(
-            "background: red; border: 1px solid #b0b0b0; border-radius: 6px;"
-        )
 
         row1.addWidget(map_group, 0, 0)
         row1.addWidget(infos_col, 0, 1)
@@ -499,7 +491,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
         )
 
         self.lbl_serial_status = QLabel("IDLE")
-        self.lbl_serial_packets = QLabel("0/18")
+        self.lbl_serial_packets = QLabel("0/19")
 
         serial_layout.addStretch(1)
         serial_layout.addWidget(self.lbl_serial_title)

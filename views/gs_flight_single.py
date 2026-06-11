@@ -5,7 +5,7 @@ from typing import Optional, Tuple, List
 import sys
 import platform
 
-from PySide6.QtCore import Qt, QTimer, Slot
+from PySide6.QtCore import Qt, QTimer, Slot, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter, QFrame, QLabel,
@@ -113,7 +113,9 @@ class BusySpinnerDialog(QDialog):
         self.label.setText(text)
         
 class GSFlightSinglePage(QWidget):
-   
+   # Sinal para pedir reinicialização na pagina main
+    requestRecreateFlightPage = Signal()
+    
     def __init__(self, net: NetManager, parent=None):
         super().__init__(parent)
         self.net = net
@@ -195,6 +197,60 @@ class GSFlightSinglePage(QWidget):
         # self._sim.timeout.connect(self._feed_fake)
         # self._sim.start(200)
 
+    # =========================
+    # Metodo para desligar pagina
+    # =========================
+    def shutdown(self):
+        """
+        Encerra recursos da página antes de ela ser destruída.
+        """
+
+        # Para gravação de tela
+        try:
+            self.stop_ui_recording()
+        except Exception as e:
+            print("[SHUTDOWN] Erro ao parar gravação:", e)
+
+        # Para todos os timers conhecidos
+        timer_names = (
+            "timer_serial",
+            "serial_watchdog",
+            "serial_hz_timer",
+            "_ui_rec_timer",
+        )
+
+        for name in timer_names:
+            timer = getattr(self, name, None)
+
+            if timer is not None:
+                try:
+                    timer.stop()
+                except Exception as e:
+                    print(f"[SHUTDOWN] Erro ao parar {name}:", e)
+
+        # Fecha serial
+        try:
+            if self.ser is not None:
+                self._force_disconnect_serial(
+                    reason="Página reinicializada",
+                    send_rst=False
+                )
+        except Exception as e:
+            print("[SHUTDOWN] Erro ao fechar serial:", e)
+
+        # Desconecta sinal externo
+        try:
+            self.net.netChanged.disconnect(self.onNetChanged)
+        except Exception:
+            pass
+
+        # Fecha logger, caso ele tenha método close
+        try:
+            if self.logger is not None and hasattr(self.logger, "close"):
+                self.logger.close()
+        except Exception as e:
+            print("[SHUTDOWN] Erro ao fechar logger:", e)
+            
     # =========================
     # GRAVAÇÃO (full screen)
     # =========================
@@ -596,10 +652,7 @@ class GSFlightSinglePage(QWidget):
         self.lbl_vel = QLabel("—")
         self.lbl_temp = QLabel("—")
 
-        # SD Card status
-        label_sd = QLabel("SD Card")
-        label_sd.setAlignment(Qt.AlignCenter)
-        info_lay.addWidget(label_sd, 4, 0, 1, 2)
+
 
         info_lay.addWidget(QLabel("Altura Atual (m):"), 0, 0)
         info_lay.addWidget(self.lbl_alt_max, 0, 1)
@@ -609,6 +662,12 @@ class GSFlightSinglePage(QWidget):
         info_lay.addWidget(self.lbl_vel, 2, 1)
         info_lay.addWidget(QLabel("Temperatura (C°):"), 3, 0)
         info_lay.addWidget(self.lbl_temp, 3, 1)
+        
+        # SD Card status
+        label_sd = QLabel("SD Card")
+        label_sd.setAlignment(Qt.AlignCenter)
+        info_lay.addWidget(label_sd, 4, 0, 1, 2)
+        
         self.sd_box = QFrame()
         self.sd_box.setFrameShape(QFrame.StyledPanel)
         self.sd_box.setStyleSheet("background: red; border: 1px solid #ccc; border-radius: 6px;")
@@ -631,8 +690,8 @@ class GSFlightSinglePage(QWidget):
         self.lbl_dist = QLabel("—")
 
         # Títulos para as labels
-        lbl_precisao_title = QLabel("Precisão (HDOP)")
-        lbl_precisao_title.setAlignment(Qt.AlignCenter)
+        # lbl_precisao_title = QLabel("Precisão (HDOP)")
+        # lbl_precisao_title.setAlignment(Qt.AlignCenter)
 
         lbl_horario_title = QLabel("Horário (UTC-LOCAL)")
         lbl_horario_title.setAlignment(Qt.AlignCenter)
@@ -722,7 +781,7 @@ class GSFlightSinglePage(QWidget):
 
     @Slot()
     def _check_serial_timeout(self):
-        if time.time() - self._last_rx_time > 2.0:
+        if time.time() - self._last_rx_time > 2.5:
             self._set_serial_status("idle")
 
 
@@ -953,8 +1012,8 @@ class GSFlightSinglePage(QWidget):
 
             "D": "pqd_dn",   
             "d": "pqd_db",   
-            "N": "pqd_mn",   
-            "B": "pqd_mb",
+            "M": "pqd_mn",   
+            "m": "pqd_mb",
 
             "c": "temp",
 
@@ -1055,7 +1114,7 @@ class GSFlightSinglePage(QWidget):
 
         self.lbl_serial_packets.setText(f"{valid_fields}/{total_fields}")
 
-        if valid_fields == total_fields:
+        if (valid_fields) >= total_fields - 3: # exclui roll, pitch e yaw pois nao sao enviados em todos os softwares
             self._set_serial_status("ok")
         else:
             self._set_serial_status("bad")
@@ -1124,7 +1183,9 @@ class GSFlightSinglePage(QWidget):
             else:
                 color = "red"
             self.lbl_precisao.setStyleSheet(f"background: {color}; border: 1px solid #ccc; border-radius: 6px;")
-
+        else:
+            self.lbl_precisao.setStyleSheet("background: red; border: 1px solid #ccc; border-radius: 6px;")
+            
         # altitude + gráfico
         if self._is_ok(altitude) and self._is_ok(tempo):
             self.series_t.append(tempo)
@@ -1143,23 +1204,25 @@ class GSFlightSinglePage(QWidget):
 
         # SD
         if self._is_ok(sd):
-            self.sd_box.setStyleSheet("background: green; border: 1px solid #ccc; border-radius: 6px;" if sd == 1 else
-                                    "background: red; border: 1px solid #ccc; border-radius: 6px;")
+            if sd == 1.0:    
+                self.sd_box.setStyleSheet("background: green; border: 1px solid #ccc; border-radius: 6px;")
+            else:
+                self.sd_box.setStyleSheet("background: red; border: 1px solid #ccc; border-radius: 6px;")
 
         # Paraquedas 
         if self._is_ok(pqd_dn):
-            self.lastvalue_dn = self._is_ok(pqd_dn)
+            self.lastvalue_dn = pqd_dn
         if self._is_ok(pqd_db):
-            self.lastvalue_db = self._is_ok(pqd_db)
+            self.lastvalue_db = pqd_db
         if self._is_ok(pqd_mn):
-            self.lastvalue_mn = self._is_ok(pqd_mn)
+            self.lastvalue_mn = pqd_mn
         if self._is_ok(pqd_mb):
-            self.lastvalue_mb = self._is_ok(pqd_mb)
+            self.lastvalue_mb = pqd_mb
         
         self._set_pq(0, pqd_dn if self._is_ok(pqd_dn) else self.lastvalue_dn)
         self._set_pq(1, pqd_db if self._is_ok(pqd_db) else self.lastvalue_db)
         self._set_pq(2, pqd_mn if self._is_ok(pqd_mn) else self.lastvalue_mn)
-        self._set_pq(3, pqd_mb if self._is_ok(pqd_mb) else self.lastvalue_mb )
+        self._set_pq(3, pqd_mb if self._is_ok(pqd_mb) else self.lastvalue_mb)
 
         if self._is_ok(temperatura):
             self.lbl_temp.setText(self._fmt(temperatura, "{:.2f}"))
@@ -1497,12 +1560,13 @@ class GSFlightSinglePage(QWidget):
                         "Localização obtida do GPS",
                         f"Lat: {lat:.6f}, Lon: {lon:.6f}"
                     )
-                else:
-                    QMessageBox.warning(
-                        self,
-                        "GPS",
-                        "Não foi possível obter coordenadas válidas no tempo limite.\nSerial conectada com sucesso!"
-                    )
+                #else:
+                    # Sem coordenadas validas mas com conexao ok nao gera mais popup
+                    # QMessageBox.warning(
+                    #     self,
+                    #     "GPS",
+                    #     "Não foi possível obter coordenadas válidas no tempo limite.\nSerial conectada com sucesso!"
+                    # )
 
                 # 5) drena rapidamente o que restou do handshake/header
                 self._drain_serial_input(seconds=0.40)
@@ -1909,21 +1973,20 @@ class GSFlightSinglePage(QWidget):
         self.serial_beep_enabled = bool(enabled)
 
     def reset_altitude_graph(self):
-        try:
-            self.alt_curve.setData([], [])
-        except Exception:
-            pass
+        # Limpa os dados do gráfico
+        self.series_t.clear()
+        self.series_alt.clear()
 
-        if hasattr(self, "alt_x"):
-            self.alt_x.clear()
-        if hasattr(self, "alt_y"):
-            self.alt_y.clear()
-        if hasattr(self, "alt_data"):
-            self.alt_data.clear()
-        if hasattr(self, "plot_time"):
-            self.plot_time.clear()
-        if hasattr(self, "plot_alt"):
-            self.plot_alt.clear()
+        # Limpa a curva visual
+        self.alt_curve.setData([], [])
+
+        # Reinicia valores usados no cálculo de velocidade
+        self.t_last = None
+        self.alt_last = None
+
+        # Como não há mais dois pontos, a velocidade atual deixa de existir
+        self.lbl_vel.setText("—")
+    
     # Net
     def onNetChanged(self, status: bool):
         self.apply_map_mode()
