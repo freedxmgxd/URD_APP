@@ -163,6 +163,9 @@ class OfflineRequestInterceptor(QWebEngineUrlRequestInterceptor):
 
 class DebugPage(QWebEnginePage):
     def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
+        if sourceID.startswith("data:text/html"):
+            sourceID = "map.html"
+
         print(f"[JS] {sourceID}:{lineNumber} {message}")
 
 
@@ -364,6 +367,25 @@ class MapWidget(QWebEngineView):
         #map {
         position: relative;
         }
+        
+        #coordWarn {
+        position: absolute;
+        top: 38px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 9001;
+        background: rgba(183, 28, 28, 0.95);
+        color: white;
+        border: 1px solid rgba(255,255,255,0.35);
+        padding: 6px 12px;
+        font-family: sans-serif;
+        font-size: 12px;
+        font-weight: 700;
+        border-radius: 6px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+        pointer-events: none;
+        display: none;
+        }
 
         /* HUD central */
         #centerHud {
@@ -398,7 +420,7 @@ class MapWidget(QWebEngineView):
         pointer-events: auto !important;
         }
 
-        /* seus botões customizados */
+        /* botões customizados */
         .leaflet-control-urd-btn {
         background: rgba(255,255,255,0.96);
         border: 1px solid #cfcfcf;
@@ -565,32 +587,84 @@ class MapWidget(QWebEngineView):
 
           window.setBaseLayer = setBaseLayer;
           window.cycleBaseLayer = cycleBaseLayer;
+          
+          var coordWarnTimer = null;
+
+            function showCoordWarning(msg) {{
+            var el = document.getElementById("coordWarn");
+            if (!el) return;
+
+            el.innerText = msg;
+            el.style.display = "block";
+
+            if (coordWarnTimer) clearTimeout(coordWarnTimer);
+
+            coordWarnTimer = setTimeout(function() {{
+                el.style.display = "none";
+            }}, 3000);
+            }}
 
           function addPoint(lat, lon) {{
             var ll = [lat, lon];
+            var maxDeltaDeg = 0.5;
+
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) {{
+                console.warn("[MAP WIDGET] Ponto ignorado: coordenada inválida:", lat, lon);
+                return;
+            }}
+
+            var points = pathPoly.getLatLngs();
+
+            if (points.length > 0) {{
+                var last = points[points.length - 1];
+
+                var dLat = Math.abs(lat - last.lat);
+                var dLon = Math.abs(lon - last.lng);
+
+                if (dLat > maxDeltaDeg || dLon > maxDeltaDeg) {{
+                var msg =
+                    "[MAP WIDGET] Ponto ignorado por salto de coordenada. dLat=" +
+                    dLat.toFixed(6) + " dLon=" + dLon.toFixed(6);
+
+                console.warn(msg);
+
+                showCoordWarning(
+                    "Coordenada ignorada: salto muito grande (" +
+                    dLat.toFixed(3) + "°, " + dLon.toFixed(3) + "°)"
+                );
+
+                return;
+                }}
+            }}
+
             pathPoly.addLatLng(ll);
 
             if (!rocketMarker) {{
-              rocketMarker = L.circleMarker(ll, {{
-                radius: 7, color: "#2e7d32",
-                fillColor: "#66bb6a", fillOpacity: 0.9
-              }}).bindTooltip("Foguete", {{permanent:true, direction:"top"}}).addTo(map);
+                rocketMarker = L.circleMarker(ll, {{
+                radius: 7,
+                color: "#2e7d32",
+                fillColor: "#66bb6a",
+                fillOpacity: 0.9
+                }}).bindTooltip("Foguete", {{
+                permanent: true,
+                direction: "top"
+                }}).addTo(map);
             }} else {{
-              rocketMarker.setLatLng(ll);
+                rocketMarker.setLatLng(ll);
             }}
 
             if (lockView) {{
-              if (map.getZoom() < 14) map.setZoom(14);
-              map.panTo(ll, {{animate:false}});
+                if (map.getZoom() < 14) map.setZoom(14);
+                map.panTo(ll, {{animate:false}});
             }}
 
             if (baseMarker) {{
-              if (baseLine) map.removeLayer(baseLine);
-              baseLine = L.polyline([baseMarker.getLatLng(), rocketMarker.getLatLng()], {{
+                if (baseLine) map.removeLayer(baseLine);
+                baseLine = L.polyline([baseMarker.getLatLng(), rocketMarker.getLatLng()], {{
                 color: '#ff9800'
-              }}).addTo(map);
+                }}).addTo(map);
             }}
-          }}
+            }}
 
           function setBase(lat, lon, zoom) {{
             if (baseMarker) map.removeLayer(baseMarker);
@@ -754,8 +828,9 @@ class MapWidget(QWebEngineView):
           {self._build_style_block()}
         </head>
         <body>
-          <div id="centerHud"></div>
-          <div id="map"></div>
+            <div id="centerHud"></div>
+            <div id="coordWarn"></div>
+            <div id="map"></div>
           {self._build_map_script(context, base_key)}
         </body>
         </html>

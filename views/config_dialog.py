@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import time
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QLocale
 from PySide6.QtGui import QDoubleValidator
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox, QLabel, QLineEdit,
@@ -311,16 +311,22 @@ class ConfigDialog(QDialog):
 
         self.base_lat = QLineEdit()
         self.base_lon = QLineEdit()
+
         self.base_lat.setPlaceholderText("ex.: -23.550520")
         self.base_lon.setPlaceholderText("ex.: -46.633308")
 
-        lat_validator = QDoubleValidator(-90.0, 90.0, 6)
-        lat_validator.setNotation(QDoubleValidator.StandardNotation)
-        self.base_lat.setValidator(lat_validator)
+        locale = QLocale.c()  # usa ponto como decimal
+        locale.setNumberOptions(QLocale.RejectGroupSeparator)
 
-        lon_validator = QDoubleValidator(-180.0, 180.0, 6)
-        lon_validator.setNotation(QDoubleValidator.StandardNotation)
-        self.base_lon.setValidator(lon_validator)
+        self.lat_validator = QDoubleValidator(-90.0, 90.0, 6, self.base_lat)
+        self.lat_validator.setNotation(QDoubleValidator.StandardNotation)
+        self.lat_validator.setLocale(locale)
+        self.base_lat.setValidator(self.lat_validator)
+
+        self.lon_validator = QDoubleValidator(-180.0, 180.0, 6, self.base_lon)
+        self.lon_validator.setNotation(QDoubleValidator.StandardNotation)
+        self.lon_validator.setLocale(locale)
+        self.base_lon.setValidator(self.lon_validator)
 
         lay_map.addWidget(QLabel("Latitude (entrada)"), r, 0)
         lay_map.addWidget(self.base_lat, r, 1)
@@ -387,10 +393,45 @@ class ConfigDialog(QDialog):
         self.lbl_tiles.setAlignment(Qt.AlignCenter)
 
         self.btn_pick_tiles = QPushButton("Selecionar pasta de tiles…")
+
+        self.btn_pick_tiles.setStyleSheet("""
+        QPushButton {
+            background-color: #2f2f2f;
+            color: #ffffff;
+            border: 1px solid #555555;
+            border-radius: 6px;
+            padding: 6px 12px;
+        }
+
+        QPushButton:hover {
+            background-color: #3a3a3a;
+        }
+
+        QPushButton:disabled {
+            background-color: #1f1f1f;
+            color: #777777;
+            border: 1px solid #333333;
+        }
+        """)
+
         try:
-            self.btn_pick_tiles.setEnabled(not self.gs_single.net.get_status())
+            is_online = self.gs_single.net.get_status()
+
+            self.btn_pick_tiles.setEnabled(not is_online)
+
+            if is_online:
+                self.btn_pick_tiles.setToolTip("Para selecionar tiles, coloque o mapa em modo offline.")
+            else:
+                self.btn_pick_tiles.setToolTip("Selecionar tiles para uso offline.")
+
         except Exception:
             self.btn_pick_tiles.setEnabled(True)
+            self.btn_pick_tiles.setToolTip("Selecionar tiles para uso offline.")
+            
+        # try:
+        #     self.btn_pick_tiles.setEnabled(not self.gs_single.net.get_status())
+        # except Exception:
+        #     self.btn_pick_tiles.setEnabled(True)
 
         lay_map.addWidget(self.lbl_tiles, r, 0, 1, 2)
         r += 1
@@ -544,7 +585,7 @@ class ConfigDialog(QDialog):
             "  Y       yaw                       Yaw em graus\n\n"
             "Se algum campo vier inválido, ausente ou fora da faixa, o app marca o pacote como\n"
             "parcialmente inválido. O Status Serial muda para RX ERR e o contador mostra quantos\n"
-            "campos válidos chegaram, por exemplo 16/19.\n\n"
+            "campos válidos chegaram, por exemplo 16/19. Se chegar 16 ou mais pacotes a cada 2.5s vai aparecer RX OK, caso o contrário vai aparecer RX ERR.\n\n"
 
             "4) TERMINAL E STATUS SERIAL\n"
             "------------------------------------------------------------\n"
@@ -626,31 +667,23 @@ class ConfigDialog(QDialog):
             "  - Não envia se o Address não for inteiro.\n"
             "  - Não envia se o Address estiver fora de 0-65535.\n"
             "  - Não envia se a placa não estiver conectada.\n\n"
-            "Sequência esperada:\n\n"
-            "  APP -> GS: MUDAR_FREQUENCIA\n"
-            "  APP -> GS: VALS:FREQXXX\\tADDRESS\n\n"
-            "Resposta inicial:\n"
-            "  GS -> APP: MUDAR_OK\n"
-            "      A GS aceitou os valores e iniciou o processo.\n\n"
-            "  GS -> APP: MUDAR_FREQUENCIA_ERROR\n"
-            "      A GS recusou os valores ou nem iniciou o processo.\n\n"
-            "Resultado final:\n"
-            "  GS -> APP: MUDAR_CERTO\n"
-            "      Troca confirmada.\n\n"
-            "  GS -> APP: MUDAR_ERRO_GS\n"
-            "      Falha ao mudar a configuração da própria Ground Station.\n\n"
-            "  GS -> APP: MUDAR_ERRO\n"
+            "Sequência esperada:  (ADDH = A1 ADDL = B2 CHAN = C3)\n\n"
+            "GS -> FC : MUD4R_FR3Q_PFV.CH4NC3_A1B2#\n"
+            "FC -> GS : CTZ_FR3Q.CH4NC3_A1B2#\n"
+            "GS -> FC : 1SSO_MSM\n\n"
+            
+            "GS e FC efetuam a tentativa de troca de frequencia\n\n"
+            
+            "GS -> FC : MUD0U_MSM\n"
+            "FC -> GS : JUR0_JUR4D1NH0\n"
+            "GS -> FC : B04\n\n"
+            
+            "GS -> APP: MUDAR_ERRO\n"
             "      Falha no Flight Computer ou timeout. A GS deve tentar voltar para o default.\n\n"
             "Default esperado em caso de erro:\n"
             "  FREQ903\\t43\n\n"
             "Durante a troca, o app para temporariamente a leitura normal da serial, abre o popup\n"
             "de carregamento, envia os comandos, espera as respostas e depois reativa a leitura.\n\n"
-
-            "11) OBSERVAÇÕES\n"
-            "------------------------------------------------------------\n"
-            " - O TAB entre FREQXXX e ADDRESS deve ser um TAB real quando enviado pelo app.\n"
-            " - No Python, use: f'VALS:{frequency}\\t{address}'.\n"
-            " - No Serial Monitor, digitar \\t pode mandar barra+t, não TAB real.\n"
         )
 
         dlg = QDialog(self)
@@ -935,30 +968,25 @@ class ConfigDialog(QDialog):
             "Isso limpa apenas o gráfico de altitude.\n\nContinuar?",
             QMessageBox.Yes | QMessageBox.No
         )
+
         if ok != QMessageBox.Yes:
             return
 
-        # limpa curva visível
         try:
-            self.gs_single.alt_curve.setData([], [])
-        except Exception:
-            pass
+            self.gs_single.reset_altitude_graph()
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Erro",
+                f"Não foi possível reinicializar o gráfico:\n{e}"
+            )
+            return
 
-        # limpa buffers comuns, caso existam
-        for attr in (
-            "alt_x", "alt_y", "plot_time", "plot_alt",
-            "_plot_x", "_plot_y", "alt_data_x", "alt_data_y"
-        ):
-            try:
-                obj = getattr(self.gs_single, attr)
-                if hasattr(obj, "clear"):
-                    obj.clear()
-                elif isinstance(obj, list):
-                    obj[:] = []
-            except Exception:
-                pass
-
-        QMessageBox.information(self, "OK", "Gráfico de altitude reinicializado.")
+        QMessageBox.information(
+            self,
+            "OK",
+            "Gráfico de altitude reinicializado."
+        )
 
     # -----------------------------
     # Tiles offline (runtime-only)

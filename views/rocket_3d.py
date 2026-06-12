@@ -128,22 +128,22 @@ class Rocket3DView(QWidget):
         // ---- MINI FOGUETE ----
         var rocket = new THREE.Group();
 
-        // Corpo (cilindro) - laranja
+        // Corpo (cilindro) - azul AIRUMA
         var bodyGeometry = new THREE.CylinderGeometry(0.3, 0.3, 2, 32);
-        var bodyMaterial = new THREE.MeshPhongMaterial({{color: 0xff6600}});
+        var bodyMaterial = new THREE.MeshPhongMaterial({{color: 0x001750}});
         var body = new THREE.Mesh(bodyGeometry, bodyMaterial);
         rocket.add(body);
 
-        // Nariz (cone) - laranja
+        // Nariz (cone) - azul AIRUMA
         var noseGeometry = new THREE.ConeGeometry(0.3, 0.8, 32);
-        var noseMaterial = new THREE.MeshPhongMaterial({{color: 0xff6600}});
+        var noseMaterial = new THREE.MeshPhongMaterial({{color: 0x001750}});
         var nose = new THREE.Mesh(noseGeometry, noseMaterial);
         nose.position.y = 1.4;
         rocket.add(nose);
 
-        // Aletas (4 caixas) - pretas
+        // Aletas (4 caixas) - dourado AIRUMA
         var finGeometry = new THREE.BoxGeometry(0.5, 0.8, 0.1); // mais finas e compridas
-        var finMaterial = new THREE.MeshPhongMaterial({{color: 0x000000}});
+        var finMaterial = new THREE.MeshPhongMaterial({{color: 0xb59c47}});
         for (let i = 0; i < 4; i++) {{
             var fin = new THREE.Mesh(finGeometry, finMaterial);
             fin.position.y = -0.7;  // subiu um pouco
