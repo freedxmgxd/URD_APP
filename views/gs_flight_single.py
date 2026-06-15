@@ -448,8 +448,13 @@ class GSFlightSinglePage(QWidget):
         self.lbl_serial_packets.setStyleSheet("font-size:10px;")
         serial_row.addWidget(self.lbl_serial_packets)
 
+        self.lbl_lora_config = QLabel("FREQ: — | ADDR: —")
+        self.lbl_lora_config.setAlignment(Qt.AlignCenter)
+        self.lbl_lora_config.setStyleSheet("font-size:10px; font-weight:bold; color: #888;")
+
         serial_layout.addWidget(self.lbl_serial_title)
         serial_layout.addLayout(serial_row)
+        serial_layout.addWidget(self.lbl_lora_config)
 
         # =========================
         # LAYOUT FINAL DA LINHA
@@ -855,6 +860,63 @@ class GSFlightSinglePage(QWidget):
         for i in range(4):
             self._set_pq(i, 0.0)
 
+        self.current_lora_freq = "—"
+        self.current_lora_addr = "—"
+        self._update_lora_display()
+
+    def _update_lora_display(self):
+        if hasattr(self, "lbl_lora_config"):
+            self.lbl_lora_config.setText(f"FREQ: {self.current_lora_freq} | ADDR: {self.current_lora_addr}")
+
+    def _parse_lora_info_from_line(self, line: str):
+        if not line:
+            return
+        m = re.search(r"Frequency:\s*(\d+)\s*MHz,\s*ADDH=(?:0x)?([0-9A-Fa-f]+),\s*ADDL=(?:0x)?([0-9A-Fa-f]+)", line, re.IGNORECASE)
+        if m:
+            chan = int(m.group(1))
+            addh = int(m.group(2), 16)
+            addl = int(m.group(3), 16)
+            freq_mhz = 862 + chan
+            addr_hex = f"{(addh << 8) | addl:04X}"
+            self.current_lora_freq = f"{freq_mhz} MHz (CHAN {chan})"
+            self.current_lora_addr = f"0x{addr_hex}"
+            if hasattr(self, "current_channel_hex"):
+                self.current_channel_hex = str(chan)
+            if hasattr(self, "current_address_hex"):
+                self.current_address_hex = addr_hex
+            self._update_lora_display()
+            return
+
+        m = re.search(r"CHAN=(\d+),\s*ADDH DEC=(\d+),\s*ADDL DEC=(\d+)", line, re.IGNORECASE)
+        if m:
+            chan = int(m.group(1))
+            addh = int(m.group(2))
+            addl = int(m.group(3))
+            freq_mhz = 862 + chan
+            addr_hex = f"{(addh << 8) | addl:04X}"
+            self.current_lora_freq = f"{freq_mhz} MHz (CHAN {chan})"
+            self.current_lora_addr = f"0x{addr_hex}"
+            if hasattr(self, "current_channel_hex"):
+                self.current_channel_hex = str(chan)
+            if hasattr(self, "current_address_hex"):
+                self.current_address_hex = addr_hex
+            self._update_lora_display()
+            return
+
+        m = re.search(r"(?:CH4N|CHAN)(\d+)_([0-9A-Fa-f]{4})", line, re.IGNORECASE)
+        if m:
+            chan = int(m.group(1))
+            addr_hex = m.group(2).upper()
+            freq_mhz = 862 + chan
+            self.current_lora_freq = f"{freq_mhz} MHz (CHAN {chan})"
+            self.current_lora_addr = f"0x{addr_hex}"
+            if hasattr(self, "current_channel_hex"):
+                self.current_channel_hex = str(chan)
+            if hasattr(self, "current_address_hex"):
+                self.current_address_hex = addr_hex
+            self._update_lora_display()
+            return
+
     # ------------------ API pública ------------------
     NAN = float("nan")
 
@@ -1111,6 +1173,8 @@ class GSFlightSinglePage(QWidget):
 
         # marcou que recebeu algo (para watchdog)
         self._last_rx_time = time.time()
+
+        self._parse_lora_info_from_line(line)
 
         parsed = self._parse_packet(line)
 
@@ -1822,6 +1886,8 @@ class GSFlightSinglePage(QWidget):
         """
         if not line:
             return
+
+        self._parse_lora_info_from_line(line)
 
         if self._is_boot_noise_line(line):
             return
