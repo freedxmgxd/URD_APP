@@ -1178,18 +1178,12 @@ class URDSimulatorPage(QWidget):
             else ""
         )
         self.combo_ports.clear()
-        is_linux = platform.system().lower() == "linux"
-
         ports = []
         for p in serial.tools.list_ports.comports():
             desc = (p.description or "").lower()
             device = p.device
             if "bluetooth" in desc:
                 continue
-
-            if is_linux:
-                if not any(x in device for x in ["ttyUSB", "ttyACM"]):
-                    continue
 
             ports.append(device)
 

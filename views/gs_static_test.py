@@ -218,17 +218,11 @@ class GSTestEstaticoPage(QWidget):
     # ---------------- Serial ----------------
     def refresh_ports(self):
         self.combo_ports.clear()
-        is_linux = platform.system().lower() == "linux"
-
         for port in serial.tools.list_ports.comports():
             desc = port.description.lower()
             device = port.device
             if "bluetooth" in desc:
                 continue
-
-            if is_linux:
-                if not any(x in device for x in ["ttyUSB", "ttyACM"]):
-                    continue
 
             self.combo_ports.addItem(device)
         if self.combo_ports.count() == 0:

@@ -160,21 +160,16 @@ class GSFlightSinglePage(QWidget):
         self._last_beep_ts = 0.0
         self._beep_mode = None  # "gpio", "winsound" ou None
 
-        if self.is_linux:
+        try:
+            import winsound
+            self._beep_mode = "winsound"
+        except ImportError:
             try:
                 from gpiozero import Buzzer
-
                 self._buzzer = Buzzer(6)  # GPIO 6 no Raspberry
                 self._beep_mode = "gpio"
             except Exception:
                 self._buzzer = None
-                self._beep_mode = None
-        else:
-            try:
-                import winsound
-
-                self._beep_mode = "winsound"
-            except Exception:
                 self._beep_mode = None
 
         self.logger = None
@@ -1425,32 +1420,18 @@ class GSFlightSinglePage(QWidget):
 
         style = f"background: {color}; border: 1px solid {border}; border-radius: 8px;"
 
-        if sys.platform.startswith("linux"):
-            if idx == 0:
-                self.drogueN_text.setText(f"Normal: {height:.2f} m")
-                self.pqd_drogueN.setStyleSheet(style)
-            elif idx == 1:
-                self.drogueB_text.setText(f"Backup: {height:.2f} m")
-                self.pqd_drogueB.setStyleSheet(style)
-            elif idx == 2:
-                self.mainN_text.setText(f"Normal: {height:.2f} m")
-                self.pqd_mainN.setStyleSheet(style)
-            elif idx == 3:
-                self.mainB_text.setText(f"Backup: {height:.2f} m")
-                self.pqd_mainB.setStyleSheet(style)
-        else:
-            if idx == 0:
-                self.drogueN_text.setText(f"Normal: {height:.2f} m")
-                self.pqd_drogueN.setStyleSheet(style)
-            elif idx == 1:
-                self.drogueB_text.setText(f"Backup: {height:.2f} m")
-                self.pqd_drogueB.setStyleSheet(style)
-            elif idx == 2:
-                self.mainN_text.setText(f"Normal: {height:.2f} m")
-                self.pqd_mainN.setStyleSheet(style)
-            elif idx == 3:
-                self.mainB_text.setText(f"Backup: {height:.2f} m")
-                self.pqd_mainB.setStyleSheet(style)
+        if idx == 0:
+            self.drogueN_text.setText(f"Normal: {height:.2f} m")
+            self.pqd_drogueN.setStyleSheet(style)
+        elif idx == 1:
+            self.drogueB_text.setText(f"Backup: {height:.2f} m")
+            self.pqd_drogueB.setStyleSheet(style)
+        elif idx == 2:
+            self.mainN_text.setText(f"Normal: {height:.2f} m")
+            self.pqd_mainN.setStyleSheet(style)
+        elif idx == 3:
+            self.mainB_text.setText(f"Backup: {height:.2f} m")
+            self.pqd_mainB.setStyleSheet(style)
 
     def _open_config_dialog(self):
         dlg = ConfigDialog(self, parent=self)
@@ -1563,24 +1544,12 @@ class GSFlightSinglePage(QWidget):
             if device in ["COM3", "COM4"]:  # ignora portas padrão
                 continue
 
-            if self.is_linux:
-                if not any(x in device for x in ["ttyUSB", "ttyACM"]):
-                    continue
-
             self.combo_ports.addItem(device)
 
         # se não achar nenhuma porta
         if self.combo_ports.count() == 0:
             self.combo_ports.addItem("")  # placeholder vazio
 
-        # Seleciona /dev/ttyUSB0 por padrão no Linux
-        if self.is_linux:
-            idx = self.combo_ports.findText("/dev/ttyUSB0")
-            if idx >= 0:
-                self.combo_ports.setCurrentIndex(idx)
-            else:
-                self.combo_ports.insertItem(0, "/dev/ttyUSB0")
-                self.combo_ports.setCurrentIndex(0)
 
     def connect_serial(self):
         """Conecta na porta escolhida e faz handshake com READY / GPS_COORDS."""
