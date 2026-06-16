@@ -84,7 +84,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
         lay.addWidget(value_box)
 
         return card
-    
+
     def _build_ui(self, os_name):
         self.setObjectName("gs_rasp_page")
 
@@ -219,16 +219,20 @@ class GSFlightRaspPage(GSFlightSinglePage):
         info_lay.setVerticalSpacing(6)
         info_lay.setContentsMargins(6, 6, 6, 6)
 
+        tempo_title = QLabel("Tempo (uC)")
+        self.lbl_tempo = QLabel("—")
         self.lbl_alt_max = QLabel("—")
         self.lbl_alt_apogeu = QLabel("—")
         self.lbl_vel = QLabel("—")
         self.lbl_temp = QLabel("—")
 
-        info_lay.addWidget(self._make_info_card("Altura Atual (m)", self.lbl_alt_max), 0, 0)
-        info_lay.addWidget(self._make_info_card("Velocidade vertical (m/s)", self.lbl_vel), 0, 1)
+        info_lay.addWidget(tempo_title, 0, 0, 1, 2, alignment=Qt.AlignCenter)
+        info_lay.addWidget(self.lbl_tempo, 1, 0, 1, 2, alignment=Qt.AlignCenter)
+        info_lay.addWidget(self._make_info_card("Altura Atual (m)", self.lbl_alt_max), 2, 0)
+        info_lay.addWidget(self._make_info_card("Velocidade vertical (m/s)", self.lbl_vel), 2, 1)
 
-        info_lay.addWidget(self._make_info_card("Altura Máx (m)", self.lbl_alt_apogeu), 1, 0)
-        info_lay.addWidget(self._make_info_card("Temperatura (°C)", self.lbl_temp), 1, 1)
+        info_lay.addWidget(self._make_info_card("Altura Máx (m)", self.lbl_alt_apogeu), 3, 0)
+        info_lay.addWidget(self._make_info_card("Temperatura (°C)", self.lbl_temp), 3, 1)
 
         sd_title = QLabel("SD Card")
         sd_title.setAlignment(Qt.AlignCenter)
@@ -237,7 +241,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
             background: transparent;
             border: none;
         """)
-        info_lay.addWidget(sd_title, 2, 0, 1, 2)
+        info_lay.addWidget(sd_title, 4, 0, 1, 2)
 
         self.sd_box = QFrame()
         self.sd_box.setFrameShape(QFrame.StyledPanel)
@@ -246,7 +250,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
         self.sd_box.setStyleSheet(
             "background: red; border: 1px solid #b0b0b0; border-radius: 6px;"
         )
-        info_lay.addWidget(self.sd_box, 3, 0, 1, 2, alignment=Qt.AlignCenter)
+        info_lay.addWidget(self.sd_box, 5, 0, 1, 2, alignment=Qt.AlignCenter)
 
         # ========================
         # GPS
@@ -371,6 +375,11 @@ class GSFlightRaspPage(GSFlightSinglePage):
         # Precisão
         precisao_title = QLabel("Precisão (HDOP)")
         precisao_title.setAlignment(Qt.AlignCenter)
+        precisao_title.setStyleSheet("""
+            font-weight: 700;
+            background: transparent;
+            border: none;
+        """)
         gps_lay.addWidget(precisao_title, 6, 0, 1, 2)
 
         self.lbl_precisao = QFrame()
@@ -442,12 +451,21 @@ class GSFlightRaspPage(GSFlightSinglePage):
 
         for freq in range(862, 932):
             channel_dec = freq - 862
+            channel_hex = f"{channel_dec:02X}"
+
             self.combo_lora_freq.addItem(
-                f"FREQ{freq} / CHAN{channel_dec}",
-                str(channel_dec)
+                f"FREQ{freq} / CHAN{channel_dec} DEC",
+                channel_dec
             )
 
-        self.combo_lora_freq.setCurrentText("FREQ903 / CHAN29")
+        self.combo_lora_freq.setCurrentText("FREQ903 / CHAN41 DEC")
+
+        self.combo_lora_freq.setToolTip(
+            "Campo em decimal (DEC).\n"
+            "Exemplo: FREQ903 / CHAN41 DEC.\n\n"
+            "Ao enviar, o canal é convertido para HEX sem 0x.\n"
+            "Exemplo: CHAN41 DEC -> CHAN29 HEX."
+        )
 
         self.input_lora_addr = QLineEdit()
         self.input_lora_addr.setPlaceholderText("0xA1B2")
@@ -474,7 +492,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
         lora_cfg_row.addWidget(self.input_lora_addr)
         lora_cfg_row.addWidget(self.btn_lora_change)
         lora_cfg_row.addWidget(self.btn_lora_force_change)
-        
+
         # -------- status serial em cima --------
         self.serial_block = QWidget()
         serial_layout = QHBoxLayout(self.serial_block)
@@ -521,6 +539,13 @@ class GSFlightRaspPage(GSFlightSinglePage):
         self.lbl_status.setStyleSheet(
             "color:#666; font-style:italic; padding:4px; border-top:1px solid #ccc;"
         )
+
+        self.status_check_timer = QTimer(self)
+        self.status_check_timer.timeout.connect(self._refresh_connection_status)
+        self.status_check_timer.start(60000)  # 15 s
+        self.lora_change_running = False # flag para evitar refresh de status durante mudança de configuração LoRa
+
+        self._refresh_connection_status()
 
         row2_lay.addLayout(controls_top)
         row2_lay.addLayout(lora_cfg_row)
@@ -569,7 +594,6 @@ class GSFlightRaspPage(GSFlightSinglePage):
 
         main.addLayout(row3)
 
-
         # ============================================================
         # SINAIS
         # ============================================================
@@ -582,10 +606,21 @@ class GSFlightRaspPage(GSFlightSinglePage):
         )
         self.btn_lora_change.clicked.connect(self._send_lora_change_config)
         self.btn_lora_force_change.clicked.connect(self._send_lora_forced_change_config)
-    
+
+    def _refresh_connection_status(self):
+        if getattr(self, "lora_change_running", False):
+            return
+
+        try:
+            if self.ser and self.ser.is_open and self.connected_ok:
+                self._set_status(f"Conectado em {self.ser.port}", "#060")
+            else:
+                self._set_status("Desconectado", "#666")
+        except Exception:
+            self._set_status("Desconectado", "#666")
+
     def _send_lora_forced_change_config(self):
         self._send_lora_change_config(forced=True)
-
 
     def _send_lora_change_config(self, forced: bool = False):
         """
@@ -608,6 +643,8 @@ class GSFlightRaspPage(GSFlightSinglePage):
         UI_STAGE_TIMEOUT_S = GS_TIMEOUT_S + UI_MARGIN_S
         SEND_DELAY_S = 0.15
 
+        self.lora_change_running = True
+
         error_messages = {
             "MUDAR_ERRO_SEM_PEDIDO": (
                 "A Ground Station recebeu VALS sem antes receber "
@@ -618,15 +655,20 @@ class GSFlightRaspPage(GSFlightSinglePage):
             ),
             "MUDAR_ERRO_FORMATO": (
                 "Formato inválido.\n\n"
-                "O esperado é:\n"
+                "O esperado no pacote enviado é:\n"
                 "VALS:CHANXX_A1B2\n\n"
+                "Onde XX é o CHAN em HEX sem 0x.\n\n"
                 "Exemplo:\n"
-                "VALS:CHAN29_A1B2"
+                "Interface: CHAN41 DEC\n"
+                "Envio: VALS:CHAN29_A1B2"
             ),
             "MUDAR_ERRO_CHAN": (
-                "CHAN inválido.\n\n"
-                "Use hexadecimal com 2 casas.\n"
-                "Exemplos: 29, 2A, C3."
+                "CHAN inválido recebido pela Ground Station.\n\n"
+                "Na interface, o canal é digitado em DEC.\n"
+                "No pacote enviado ao micro, ele vai em HEX sem 0x.\n\n"
+                "Exemplo:\n"
+                "Interface: CHAN41 DEC\n"
+                "Envio: CHAN29 HEX"
             ),
             "MUDAR_ERRO_ADDR": (
                 "Address inválido.\n\n"
@@ -645,9 +687,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
             "MUDAR_ERRO_GS": (
                 "A Ground Station falhou ao aplicar a própria configuração LoRa."
             ),
-            "MUDAR_ERRO": (
-                "Erro geral durante a troca LoRa."
-            ),
+            "MUDAR_ERRO": ("Erro geral durante a troca LoRa."),
             "MUDAR_ERRO_REPORTADO_FC": (
                 "O Flight Computer reportou erro durante a troca LoRa."
             ),
@@ -681,7 +721,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
 
             return True
 
-        def parse_channel_hex_from_ui() -> str:
+        def parse_channel_from_ui() -> tuple[int, str]:
             text = self.combo_lora_freq.currentText().strip().upper()
 
             if not text:
@@ -689,41 +729,23 @@ class GSFlightRaspPage(GSFlightSinglePage):
 
             current_index = self.combo_lora_freq.currentIndex()
 
+            # Caso selecionado diretamente da lista
             if current_index >= 0:
                 item_text = self.combo_lora_freq.itemText(current_index).strip().upper()
                 item_data = self.combo_lora_freq.itemData(current_index)
 
-                if text == item_text and item_data:
-                    return str(item_data).upper().zfill(2)
+                if text == item_text and item_data is not None:
+                    channel_dec = int(item_data)
 
-            # Aceita:
-            # FREQ903 / CHAN29
-            # CHAN29
-            # 29
-            # C3
-            if "CHAN" in text:
-                after_chan = text.split("CHAN", 1)[1]
-                after_chan = after_chan.replace("/", " ").strip()
+                    if channel_dec < 0 or channel_dec > 255:
+                        raise ValueError("O CHAN deve estar entre 0 e 255 DEC.")
 
-                parts = after_chan.split()
-
-                if not parts:
-                    raise ValueError("CHAN inválido. Use algo como CHAN29.")
-
-                chan_text = parts[0].strip().upper()
-
-                if not is_hex_text(chan_text, 2):
-                    raise ValueError("O CHAN deve ter exatamente 2 casas hexadecimais. Exemplo: 29 ou C3.")
-
-                chan_value = int(chan_text, 16)
-
-                if chan_value < 0x00 or chan_value > 0xFF:
-                    raise ValueError("O CHAN deve estar entre 00 e FF.")
-
-                return chan_text
+                    channel_hex = f"{channel_dec:02X}"
+                    return channel_dec, channel_hex
 
             # Aceita:
             # FREQ903
+            # FREQ903 / CHAN41 DEC
             if text.startswith("FREQ"):
                 freq_part = text.replace("FREQ", "", 1).strip()
 
@@ -743,37 +765,67 @@ class GSFlightRaspPage(GSFlightSinglePage):
                 if freq_value < 862 or freq_value > 931:
                     raise ValueError("A frequência deve estar entre FREQ862 e FREQ931.")
 
-                return f"{freq_value - 862:02X}"
+                channel_dec = freq_value - 862
+                channel_hex = f"{channel_dec:02X}"
+
+                return channel_dec, channel_hex
 
             # Aceita:
-            # 903
-            if text.isdigit() and len(text) == 3:
-                freq_value = int(text)
+            # CHAN41
+            # CHAN41 DEC
+            if "CHAN" in text:
+                after_chan = text.split("CHAN", 1)[1]
+                after_chan = after_chan.replace("/", " ")
+                after_chan = after_chan.replace("DEC", " ")
+                after_chan = after_chan.strip()
 
-                if freq_value < 862 or freq_value > 931:
-                    raise ValueError("A frequência deve estar entre 862 e 931 MHz.")
+                parts = after_chan.split()
 
-                return f"{freq_value - 862:02X}"
+                if not parts:
+                    raise ValueError("CHAN inválido. Use algo como CHAN41.")
+
+                chan_text = parts[0].strip()
+
+                if not chan_text.isdigit():
+                    raise ValueError("Digite o CHAN em decimal. Exemplo: CHAN41.")
+
+                channel_dec = int(chan_text)
+
+                if channel_dec < 0 or channel_dec > 255:
+                    raise ValueError("O CHAN deve estar entre 0 e 255 DEC.")
+
+                channel_hex = f"{channel_dec:02X}"
+
+                return channel_dec, channel_hex
 
             # Aceita:
-            # 29
-            # C3
-            if is_hex_text(text, 2):
-                chan_value = int(text, 16)
+            # 903 como frequência
+            # 41 como canal decimal
+            if text.isdigit():
+                value = int(text)
 
-                if chan_value < 0x00 or chan_value > 0xFF:
-                    raise ValueError("O CHAN deve estar entre 00 e FF.")
+                if 862 <= value <= 931:
+                    channel_dec = value - 862
+                elif 0 <= value <= 255:
+                    channel_dec = value
+                else:
+                    raise ValueError(
+                        "Valor inválido.\n\n"
+                        "Use frequência entre 862 e 931 MHz ou CHAN entre 0 e 255 DEC."
+                    )
 
-                return text.upper()
+                channel_hex = f"{channel_dec:02X}"
+
+                return channel_dec, channel_hex
 
             raise ValueError(
                 "Campo de frequência/canal inválido.\n\n"
                 "Use um dos formatos:\n"
                 "FREQ903\n"
                 "903\n"
-                "CHAN29\n"
-                "29\n"
-                "C3"
+                "CHAN41\n"
+                "41\n\n"
+                "O campo é DEC, mas o envio final é HEX sem 0x."
             )
 
         def parse_address_hex_from_ui() -> str:
@@ -882,7 +934,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
         # VALIDAÇÃO DA UI
         # ============================================================
         try:
-            channel_hex = parse_channel_hex_from_ui()
+            channel_dec, channel_hex = parse_channel_from_ui()
             address_hex = parse_address_hex_from_ui()
         except ValueError as e:
             QMessageBox.warning(self, "LoRa", str(e))
@@ -940,7 +992,9 @@ class GSFlightRaspPage(GSFlightSinglePage):
 
             append_terminal("")
             append_terminal("[LORA CFG] Solicitando configuração LoRa...")
-            append_terminal(f"[LORA CFG] CHAN=0x{channel_hex} ADDRESS=0x{address_hex}")
+            append_terminal(
+                f"[LORA CFG] CHAN_DEC={channel_dec} CHAN_HEX={channel_hex} ADDRESS_HEX={address_hex}"
+            )
             append_terminal(f"[LORA CFG TX] {request_packet}")
 
             send_line(request_packet)
@@ -986,10 +1040,12 @@ class GSFlightRaspPage(GSFlightSinglePage):
 
                 if forced_response == "MUDAR_AGORA_OK":
                     finish_success(
-                        f"LoRa forçado: CHAN{channel_hex}, 0x{address_hex}",
+                        f"LoRa forçado: CHAN{channel_hex} HEX, {address_hex}",
                         "Configuração LoRa forçada com sucesso na Ground Station.\n\n"
-                        f"CHAN: 0x{channel_hex}\n"
-                        f"Address: 0x{address_hex}"
+                        f"CHAN DEC: {channel_dec}\n"
+                        f"CHAN HEX enviado: {channel_hex}\n"
+                        f"Address HEX: {address_hex}\n\n"
+                        f"Pacote enviado:\nVALS:CHAN{channel_hex}_{address_hex}",
                     )
                     return
 
@@ -1066,10 +1122,12 @@ class GSFlightRaspPage(GSFlightSinglePage):
 
             if final_response == "MUDAR_CERTO":
                 finish_success(
-                    f"LoRa alterado: CHAN{channel_hex}, 0x{address_hex}",
+                    f"LoRa alterado: CHAN{channel_hex} HEX, {address_hex}",
                     "Configuração LoRa alterada com sucesso.\n\n"
-                    f"CHAN: 0x{channel_hex}\n"
-                    f"Address: 0x{address_hex}"
+                    f"CHAN DEC: {channel_dec}\n"
+                    f"CHAN HEX enviado: {channel_hex}\n"
+                    f"Address HEX: {address_hex}\n\n"
+                    f"Pacote enviado:\nVALS:CHAN{channel_hex}_{address_hex}",
                 )
                 return
 
@@ -1097,3 +1155,5 @@ class GSFlightRaspPage(GSFlightSinglePage):
 
             if timer_was_active and self.ser and self.ser.is_open and self.connected_ok:
                 self.timer_serial.start(50)
+
+            self.lora_change_running = False
