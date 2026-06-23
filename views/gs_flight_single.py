@@ -127,7 +127,7 @@ class BusySpinnerDialog(QDialog):
 class GSFlightSinglePage(QWidget):
     # Sinal para pedir reinicialização na pagina main
     requestRecreateFlightPage = Signal()
-    
+
     def __init__(self, net: NetManager, parent=None):
         super().__init__(parent)
         self.net = net
@@ -245,8 +245,7 @@ class GSFlightSinglePage(QWidget):
         try:
             if self.ser is not None:
                 self._force_disconnect_serial(
-                    reason="Página reinicializada",
-                    send_rst=False
+                    reason="Página reinicializada", send_rst=False
                 )
         except Exception as e:
             print("[SHUTDOWN] Erro ao fechar serial:", e)
@@ -263,7 +262,7 @@ class GSFlightSinglePage(QWidget):
                 self.logger.close()
         except Exception as e:
             print("[SHUTDOWN] Erro ao fechar logger:", e)
-            
+
     # =========================
     # GRAVAÇÃO (full screen)
     # =========================
@@ -362,9 +361,13 @@ class GSFlightSinglePage(QWidget):
         splitter.addWidget(left)
 
         # mapa modo online/offline
-        self.map = MapWidget(offline=not self.net.get_status(), satellite=self.is_satellite, tile_folder=None)
+        self.map = MapWidget(
+            offline=not self.net.get_status(),
+            satellite=self.is_satellite,
+            tile_folder=None,
+        )
         self.apply_map_mode()
-        self.map.setMinimumSize(300, 200)   # opcional, garante espaço mínimo
+        self.map.setMinimumSize(300, 200)  # opcional, garante espaço mínimo
         left_lay.addWidget(self.map, stretch=1)
 
         # --- BOTOES TERMINAL ---
@@ -466,7 +469,7 @@ class GSFlightSinglePage(QWidget):
         # --- terminal ---
         self.terminal = QPlainTextEdit()
         self.terminal.setReadOnly(True)
-        self.terminal.setMinimumSize(300, 200)  
+        self.terminal.setMinimumSize(300, 200)
         self.terminal.setStyleSheet("""
             QPlainTextEdit {
                 background: #0f0f0f;
@@ -495,7 +498,9 @@ class GSFlightSinglePage(QWidget):
         # --- barra de status ---
         self.lbl_status = QLabel("Desconectado")
         self.lbl_status.setAlignment(Qt.AlignCenter)
-        self.lbl_status.setStyleSheet("color:#666; font-style:italic; padding:4px; border-top:1px solid #ccc;")
+        self.lbl_status.setStyleSheet(
+            "color:#666; font-style:italic; padding:4px; border-top:1px solid #ccc;"
+        )
         left_lay.addWidget(self.lbl_status)
 
         # conecta sinais
@@ -504,7 +509,8 @@ class GSFlightSinglePage(QWidget):
         self.btn_connect.clicked.connect(self.connect_serial)
         self.btn_disconnect.clicked.connect(self.disconnect_serial)
         self.combo_ports.mousePressEvent = lambda ev: (
-            self.refresh_ports(), QComboBox.mousePressEvent(self.combo_ports, ev)
+            self.refresh_ports(),
+            QComboBox.mousePressEvent(self.combo_ports, ev),
         )
 
         # ===== DIREITA =====
@@ -671,8 +677,6 @@ class GSFlightSinglePage(QWidget):
         self.lbl_vel = QLabel("—")
         self.lbl_temp = QLabel("—")
 
-
-
         info_lay.addWidget(QLabel("Altura Atual (m):"), 0, 0)
         info_lay.addWidget(self.lbl_alt_max, 0, 1)
         info_lay.addWidget(QLabel("Altura Máx (m):"), 1, 0)
@@ -681,12 +685,12 @@ class GSFlightSinglePage(QWidget):
         info_lay.addWidget(self.lbl_vel, 2, 1)
         info_lay.addWidget(QLabel("Temperatura (C°):"), 3, 0)
         info_lay.addWidget(self.lbl_temp, 3, 1)
-        
+
         # SD Card status
         label_sd = QLabel("SD Card")
         label_sd.setAlignment(Qt.AlignCenter)
         info_lay.addWidget(label_sd, 4, 0, 1, 2)
-        
+
         self.sd_box = QFrame()
         self.sd_box.setFrameShape(QFrame.StyledPanel)
         self.sd_box.setStyleSheet(
@@ -778,13 +782,11 @@ class GSFlightSinglePage(QWidget):
             color = "#4caf50"
             text = "RX OK"
 
-            self.serial_status_box.setStyleSheet(
-                """
+            self.serial_status_box.setStyleSheet("""
                 background:#4caf50;
                 border:2px solid #81c784;
                 border-radius:4px;
-                """
-            )
+                """)
 
             QTimer.singleShot(
                 120,
@@ -1110,7 +1112,6 @@ class GSFlightSinglePage(QWidget):
             "d": "pqd_db",
             "M": "pqd_mn",
             "m": "pqd_mb",
-
             "c": "temp",
             "R": "roll",
             "P": "pitch",
@@ -1212,7 +1213,9 @@ class GSFlightSinglePage(QWidget):
 
         self.lbl_serial_packets.setText(f"{valid_fields}/{total_fields}")
 
-        if (valid_fields) >= total_fields - 3: # exclui roll, pitch e yaw pois nao sao enviados em todos os softwares
+        if (
+            valid_fields
+        ) >= total_fields - 3:  # exclui roll, pitch e yaw pois nao sao enviados em todos os softwares
             self._set_serial_status("ok")
         else:
             self._set_serial_status("bad")
@@ -1270,6 +1273,16 @@ class GSFlightSinglePage(QWidget):
                 self.terminal.verticalScrollBar().maximum()
             )
 
+        try:
+            tempo = app.get("tempo")
+
+            if tempo is not None and tempo == tempo:
+                self.lbl_tempo.setText(f"{tempo:.2f}")
+            else:
+                self.lbl_tempo.setText("—")
+        except Exception:
+            pass
+        
         # GPS/mapa: só processa se não for NaN
         if self._is_ok(latitude) and self._is_ok(longitude):
             if latitude != 0.0 and longitude != 0.0:
@@ -1293,10 +1306,14 @@ class GSFlightSinglePage(QWidget):
                 color = "orange"
             else:
                 color = "red"
-            self.lbl_precisao.setStyleSheet(f"background: {color}; border: 1px solid #ccc; border-radius: 6px;")
+            self.lbl_precisao.setStyleSheet(
+                f"background: {color}; border: 1px solid #ccc; border-radius: 6px;"
+            )
         else:
-            self.lbl_precisao.setStyleSheet("background: red; border: 1px solid #ccc; border-radius: 6px;")
-            
+            self.lbl_precisao.setStyleSheet(
+                "background: red; border: 1px solid #ccc; border-radius: 6px;"
+            )
+
         # altitude + gráfico
         if self._is_ok(altitude) and self._is_ok(tempo):
             self.series_t.append(tempo)
@@ -1330,7 +1347,7 @@ class GSFlightSinglePage(QWidget):
             self.lastvalue_mn = pqd_mn
         if self._is_ok(pqd_mb):
             self.lastvalue_mb = pqd_mb
-        
+
         self._set_pq(0, pqd_dn if self._is_ok(pqd_dn) else self.lastvalue_dn)
         self._set_pq(1, pqd_db if self._is_ok(pqd_db) else self.lastvalue_db)
         self._set_pq(2, pqd_mn if self._is_ok(pqd_mn) else self.lastvalue_mn)
@@ -1565,7 +1582,11 @@ class GSFlightSinglePage(QWidget):
                 self.ser.write(b"READY\n")
                 time.sleep(0.2)
                 self.ser.write(b"GPS_COORDS\n")
-                QMessageBox.information(self, "Conexão", f"Já está conectado em {self.ser.port}. Enviando READY novamente.")
+                QMessageBox.information(
+                    self,
+                    "Conexão",
+                    f"Já está conectado em {self.ser.port}. Enviando READY novamente.",
+                )
                 return
 
             if self.logger:

@@ -684,6 +684,8 @@ class ConfigDialog(QDialog):
             "  FREQ903\\t43\n\n"
             "Durante a troca, o app para temporariamente a leitura normal da serial, abre o popup\n"
             "de carregamento, envia os comandos, espera as respostas e depois reativa a leitura.\n\n"
+            
+            "Caso seja necessario a troca de frequencia sem o aplicativo, deve-se usar o comando VALS:CHANXX_YYZZ direto na serial da GS\n"
         )
 
         dlg = QDialog(self)

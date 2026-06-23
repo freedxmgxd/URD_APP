@@ -92,7 +92,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
         lay.addWidget(value_box)
 
         return card
-    
+
     def _build_ui(self, os_name):
         self.setObjectName("gs_rasp_page")
 
@@ -227,16 +227,20 @@ class GSFlightRaspPage(GSFlightSinglePage):
         info_lay.setVerticalSpacing(6)
         info_lay.setContentsMargins(6, 6, 6, 6)
 
+        tempo_title = QLabel("Tempo (uC)")
+        self.lbl_tempo = QLabel("—")
         self.lbl_alt_max = QLabel("—")
         self.lbl_alt_apogeu = QLabel("—")
         self.lbl_vel = QLabel("—")
         self.lbl_temp = QLabel("—")
 
-        info_lay.addWidget(self._make_info_card("Altura Atual (m)", self.lbl_alt_max), 0, 0)
-        info_lay.addWidget(self._make_info_card("Velocidade vertical (m/s)", self.lbl_vel), 0, 1)
+        info_lay.addWidget(tempo_title, 0, 0, 1, 2, alignment=Qt.AlignCenter)
+        info_lay.addWidget(self.lbl_tempo, 1, 0, 1, 2, alignment=Qt.AlignCenter)
+        info_lay.addWidget(self._make_info_card("Altura Atual (m)", self.lbl_alt_max), 2, 0)
+        info_lay.addWidget(self._make_info_card("Velocidade vertical (m/s)", self.lbl_vel), 2, 1)
 
-        info_lay.addWidget(self._make_info_card("Altura Máx (m)", self.lbl_alt_apogeu), 1, 0)
-        info_lay.addWidget(self._make_info_card("Temperatura (°C)", self.lbl_temp), 1, 1)
+        info_lay.addWidget(self._make_info_card("Altura Máx (m)", self.lbl_alt_apogeu), 3, 0)
+        info_lay.addWidget(self._make_info_card("Temperatura (°C)", self.lbl_temp), 3, 1)
 
         sd_title = QLabel("SD Card")
         sd_title.setAlignment(Qt.AlignCenter)
@@ -245,7 +249,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
             background: transparent;
             border: none;
         """)
-        info_lay.addWidget(sd_title, 2, 0, 1, 2)
+        info_lay.addWidget(sd_title, 4, 0, 1, 2)
 
         self.sd_box = QFrame()
         self.sd_box.setFrameShape(QFrame.StyledPanel)
@@ -254,7 +258,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
         self.sd_box.setStyleSheet(
             "background: red; border: 1px solid #b0b0b0; border-radius: 6px;"
         )
-        info_lay.addWidget(self.sd_box, 3, 0, 1, 2, alignment=Qt.AlignCenter)
+        info_lay.addWidget(self.sd_box, 5, 0, 1, 2, alignment=Qt.AlignCenter)
 
         # ========================
         # GPS
@@ -379,6 +383,11 @@ class GSFlightRaspPage(GSFlightSinglePage):
         # Precisão
         precisao_title = QLabel("Precisão (HDOP)")
         precisao_title.setAlignment(Qt.AlignCenter)
+        precisao_title.setStyleSheet("""
+            font-weight: 700;
+            background: transparent;
+            border: none;
+        """)
         gps_lay.addWidget(precisao_title, 6, 0, 1, 2)
 
         self.lbl_precisao = QFrame()
@@ -555,6 +564,13 @@ class GSFlightRaspPage(GSFlightSinglePage):
             "color:#666; font-style:italic; padding:4px; border-top:1px solid #ccc;"
         )
 
+        self.status_check_timer = QTimer(self)
+        self.status_check_timer.timeout.connect(self._refresh_connection_status)
+        self.status_check_timer.start(60000)  # 15 s
+        self.lora_change_running = False # flag para evitar refresh de status durante mudança de configuração LoRa
+
+        self._refresh_connection_status()
+
         row2_lay.addLayout(controls_top)
         row2_lay.addLayout(lora_cfg_row)
         row2_lay.addWidget(self.lbl_header)
@@ -601,7 +617,6 @@ class GSFlightRaspPage(GSFlightSinglePage):
         row3.setColumnStretch(1, 1)
 
         main.addLayout(row3)
-
 
         # ============================================================
         # SINAIS
@@ -980,6 +995,8 @@ class GSFlightRaspPage(GSFlightSinglePage):
         UI_STAGE_TIMEOUT_S = GS_TIMEOUT_S + UI_MARGIN_S
         SEND_DELAY_S = 0.15
 
+        self.lora_change_running = True
+
         error_messages = {
             "MUDAR_ERRO_SEM_PEDIDO": (
                 "A Ground Station recebeu VALS sem antes receber "
@@ -990,15 +1007,20 @@ class GSFlightRaspPage(GSFlightSinglePage):
             ),
             "MUDAR_ERRO_FORMATO": (
                 "Formato inválido.\n\n"
-                "O esperado é:\n"
+                "O esperado no pacote enviado é:\n"
                 "VALS:CHANXX_A1B2\n\n"
+                "Onde XX é o CHAN em HEX sem 0x.\n\n"
                 "Exemplo:\n"
-                "VALS:CHAN29_A1B2"
+                "Interface: CHAN41 DEC\n"
+                "Envio: VALS:CHAN29_A1B2"
             ),
             "MUDAR_ERRO_CHAN": (
-                "CHAN inválido.\n\n"
-                "Use hexadecimal com 2 casas.\n"
-                "Exemplos: 29, 2A, C3."
+                "CHAN inválido recebido pela Ground Station.\n\n"
+                "Na interface, o canal é digitado em DEC.\n"
+                "No pacote enviado ao micro, ele vai em HEX sem 0x.\n\n"
+                "Exemplo:\n"
+                "Interface: CHAN41 DEC\n"
+                "Envio: CHAN29 HEX"
             ),
             "MUDAR_ERRO_ADDR": (
                 "Address inválido.\n\n"
@@ -1017,9 +1039,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
             "MUDAR_ERRO_GS": (
                 "A Ground Station falhou ao aplicar a própria configuração LoRa."
             ),
-            "MUDAR_ERRO": (
-                "Erro geral durante a troca LoRa."
-            ),
+            "MUDAR_ERRO": ("Erro geral durante a troca LoRa."),
             "MUDAR_ERRO_REPORTADO_FC": (
                 "O Flight Computer reportou erro durante a troca LoRa."
             ),
@@ -1053,7 +1073,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
 
             return True
 
-        def parse_channel_hex_from_ui() -> str:
+        def parse_channel_from_ui() -> tuple[int, str]:
             text = self.combo_lora_freq.currentText().strip().upper()
 
             if not text:
@@ -1061,6 +1081,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
 
             current_index = self.combo_lora_freq.currentIndex()
 
+            # Caso selecionado diretamente da lista
             if current_index >= 0:
                 item_text = self.combo_lora_freq.itemText(current_index).strip().upper()
                 item_data = self.combo_lora_freq.itemData(current_index)
@@ -1097,8 +1118,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
             elif text.isdigit() and len(text) == 3:
                 freq_value = int(text)
 
-                if freq_value < 862 or freq_value > 931:
-                    raise ValueError("A frequência deve estar entre 862 e 931 MHz.")
+                parts = after_chan.split()
 
                 chan_value = freq_value - 862
                 return f"{chan_value:02X}"
@@ -1224,7 +1244,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
         # VALIDAÇÃO DA UI
         # ============================================================
         try:
-            channel_hex = parse_channel_hex_from_ui()
+            channel_dec, channel_hex = parse_channel_from_ui()
             address_hex = parse_address_hex_from_ui()
         except ValueError as e:
             QMessageBox.warning(self, "LoRa", str(e))
@@ -1340,7 +1360,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
                     self._update_lora_display()
 
                     finish_success(
-                        f"LoRa forçado: CHAN{channel_hex}, 0x{address_hex}",
+                        f"LoRa forçado: CHAN{channel_hex} HEX, {address_hex}",
                         "Configuração LoRa forçada com sucesso na Ground Station.\n\n"
                         f"CHAN: {channel_hex} (0x{int(channel_hex):02X})\n"
                         f"Address: 0x{address_hex}"
@@ -1427,7 +1447,7 @@ class GSFlightRaspPage(GSFlightSinglePage):
                 self._update_lora_display()
 
                 finish_success(
-                    f"LoRa alterado: CHAN{channel_hex}, 0x{address_hex}",
+                    f"LoRa alterado: CHAN{channel_hex} HEX, {address_hex}",
                     "Configuração LoRa alterada com sucesso.\n\n"
                     f"CHAN: {channel_hex}\n"
                     f"Address: 0x{address_hex}"
