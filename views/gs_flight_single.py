@@ -1552,16 +1552,7 @@ class GSFlightSinglePage(QWidget):
         self.combo_ports.clear()
 
         for port in serial.tools.list_ports.comports():
-            desc = port.description.lower()
-            device = port.device
-
-            if "bluetooth" in desc:  # ignora portas BT
-                continue
-
-            if device in ["COM3", "COM4"]:  # ignora portas padrão
-                continue
-
-            self.combo_ports.addItem(device)
+            self.combo_ports.addItem(port.device)
 
         # se não achar nenhuma porta
         if self.combo_ports.count() == 0:
